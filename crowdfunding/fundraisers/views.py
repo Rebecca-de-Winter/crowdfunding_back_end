@@ -3,10 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.http import Http404
-from .models import Fundraiser
 from .models import Fundraiser, Pledge
-from .serializers import FundraiserSerializer
-from .serializers import FundraiserSerializer, PledgeSerializer
 from .serializers import FundraiserSerializer, PledgeSerializer, FundraiserDetailSerializer
 
 class FundraiserList(APIView):
@@ -38,7 +35,6 @@ class FundraiserDetail(APIView):
 
     def get(self, request, pk):
         fundraiser = self.get_object(pk)
-        serializer = FundraiserSerializer(fundraiser)
         serializer = FundraiserDetailSerializer(fundraiser)
         return Response(serializer.data)
     
