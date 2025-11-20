@@ -1,12 +1,13 @@
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, permissions
 from django.http import Http404
 from .models import Fundraiser, Pledge
 from .serializers import FundraiserSerializer, PledgeSerializer, FundraiserDetailSerializer
 
 class FundraiserList(APIView):
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get(self, request):
         fundraisers = Fundraiser.objects.all()
@@ -37,6 +38,22 @@ class FundraiserDetail(APIView):
         fundraiser = self.get_object(pk)
         serializer = FundraiserDetailSerializer(fundraiser)
         return Response(serializer.data)
+    
+    def put(self, request, pk):
+        fundraiser = self.get_object(pk)
+        serializer = FundraiserDetailSerializer(
+            instance=fundraiser,
+            data=request.data,
+            partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )    
     
 class PledgeList(APIView):
 
