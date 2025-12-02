@@ -1,145 +1,317 @@
 from rest_framework import serializers
-from .models import (
+from .models import ( # Importing directly from models.py means you can just read the class names and improt across. 
     Fundraiser,
     Pledge,
     MoneyPledge,
-    ItemPledge,
     TimePledge,
+    ItemPledge,
     Need,
     MoneyNeed,
-    ItemNeed,
     TimeNeed,
+    ItemNeed,
     RewardTier,
 )
 
+# ====================================================================================
+# REWARD TIER SERIALIZER
+# ====================================================================================
 
-# =========================
-# PLEDGES
-# =========================
-
-class PledgeSerializer(serializers.ModelSerializer):
-    supporter = serializers.ReadOnlyField(source="supporter.id")
-
-    class Meta:
-        model = Pledge
-        fields = "__all__"
-
-
-class PledgeDetailSerializer(PledgeSerializer):
+class RewardTierSerializer(serializers.ModelSerializer):
     """
-    Explicit update using validated_data, but only for fields
-    that make sense to change on a Pledge.
+    Basic serializer for a reward tier. Grabs all the fields. 
+
+    Used when:
+    - listing reward tiers for a fundraiser
+    - creating / editing reward tiers in the admin or API
     """
-    def update(self, instance, validated_data):
-        # allow updating comment, anonymous, status, need
-        for field in ["comment", "anonymous", "status", "need"]:
-            if field in validated_data:
-                setattr(instance, field, validated_data[field])
-        # we normally do NOT allow changing supporter or fundraiser from here
-        instance.save()
-        return instance
-
-
-# =========================
-# FUNDRAISERS
-# =========================
-
-class FundraiserSerializer(serializers.ModelSerializer):
-    owner = serializers.ReadOnlyField(source="owner.id")
-    # expose computed property from the model
-    is_open = serializers.ReadOnlyField()
-
     class Meta:
-        model = Fundraiser
+        model = RewardTier
         fields = "__all__"
 
 
-class FundraiserDetailSerializer(FundraiserSerializer):
-    pledges = PledgeSerializer(many=True, read_only=True)
-
-    class Meta(FundraiserSerializer.Meta):
-        fields = FundraiserSerializer.Meta.fields + ["pledges"]
-
-    def update(self, instance, validated_data):
-        """
-        Explicit update using validated_data, but:
-        - don't touch owner or created timestamps
-        - don't touch is_open directly (it's a property based on status)
-        """
-        editable_fields = [
-            "title",
-            "description",
-            "goal",
-            "image_url",
-            "location",
-            "start_date",
-            "end_date",
-            "status",
-            "enable_rewards",
-            "sort_order",
-        ]
-        for field in editable_fields:
-            if field in validated_data:
-                setattr(instance, field, validated_data[field])
-        instance.save()
-        return instance
-
-
-# =========================
-# NEEDS + DETAIL NEEDS
-# =========================
-
-class NeedSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Need
-        fields = "__all__"
-
+# ====================================================================================
+# NEED DETAIL MODELS (MoneyNeed / TimeNeed / ItemNeed)
+# ====================================================================================
 
 class MoneyNeedSerializer(serializers.ModelSerializer):
+    """
+    Extra details for money-type needs. Grabs all the fields. 
+    One-to-one with Need via Need.money_detail. (Money_detail lives in models.py under "related name")
+    """
     class Meta:
         model = MoneyNeed
         fields = "__all__"
 
+    def validate_target_amount(self, value):
+        """
+        Make sure target_amount is > 0.
+        This runs AFTER basic type conversion but BEFORE save().
+        """
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Target amount must be greater than zero."
+            )
+        return value
+
 
 class TimeNeedSerializer(serializers.ModelSerializer):
+    """
+    Extra details for time-type needs.
+    One-to-one with Need via Need.time_detail.
+    """
     class Meta:
         model = TimeNeed
         fields = "__all__"
 
+    def validate(self, attrs):
+        """
+        Object-level validation:
+        Ensures end_datetime is after start_datetime. Runs after all the above fields have been cleaned. 
+
+        Supports both CREATE and PATCH:
+        - For create, both values come from attrs.
+        - For PATCH, some fields may be omitted, so we fall back to instance values.
+        """
+        start = attrs.get("start_datetime") or getattr(
+            self.instance, "start_datetime", None
+        )
+        end = attrs.get("end_datetime") or getattr(
+            self.instance, "end_datetime", None
+        )
+
+        if start and end and end <= start:
+            raise serializers.ValidationError(
+                "end_datetime must be after start_datetime."
+            )
+        return attrs
+
 
 class ItemNeedSerializer(serializers.ModelSerializer):
+    """
+    Extra details for item-type needs.
+    One-to-one with Need via Need.item_detail. (Item_ detail lives in models.py under "related name")
+    """
     class Meta:
         model = ItemNeed
         fields = "__all__"
 
+    def validate_quantity_needed(self, value):
+        """
+        Ensure we don't create a need with zero or negative quantity.
+        """
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Quantity needed must be at least 1."
+            )
+        return value
 
-# =========================
-# PLEDGE DETAIL TABLES
-# =========================
+
+# ====================================================================================
+# NEED BASE SERIALIZER
+# ====================================================================================
+
+class NeedSerializer(serializers.ModelSerializer):
+    """
+    Basic Need serializer:
+    - used for listing needs
+    - used for creating / updating a need
+    """
+    class Meta:
+        model = Need
+        fields = "__all__"
+        read_only_fields = ["date_created", "date_updated"]
+
+
+# ====================================================================================
+# PLEDGE DETAIL MODELS (MoneyPledge / TimePledge / ItemPledge)
+# ====================================================================================
 
 class MoneyPledgeSerializer(serializers.ModelSerializer):
+    """
+    Extra details for a money pledge.
+    One-to-one with Pledge via Pledge.money_detail.
+    """
     class Meta:
         model = MoneyPledge
         fields = "__all__"
 
-
-class ItemPledgeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ItemPledge
-        fields = "__all__"
+    def validate_amount(self, value):
+        """
+        Ensure pledge amount is > 0.
+        """
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Amount must be greater than zero."
+            )
+        return value
 
 
 class TimePledgeSerializer(serializers.ModelSerializer):
+    """
+    Extra details for a time pledge.
+    One-to-one with Pledge via Pledge.time_detail.
+    """
     class Meta:
         model = TimePledge
         fields = "__all__"
 
+    def validate(self, attrs):
+        """
+        Ensure end_datetime is after start_datetime.
+        Supports both create and partial update (PATCH).
+        """
+        start = attrs.get("start_datetime") or getattr(
+            self.instance, "start_datetime", None
+        )
+        end = attrs.get("end_datetime") or getattr(
+            self.instance, "end_datetime", None
+        )
 
-# =========================
-# REWARD TIERS
-# =========================
+        if start and end and end <= start:
+            raise serializers.ValidationError(
+                "end_datetime must be after start_datetime."
+            )
+        return attrs
 
-class RewardTierSerializer(serializers.ModelSerializer):
+
+class ItemPledgeSerializer(serializers.ModelSerializer):
+    """
+    Extra details for an item pledge.
+    One-to-one with Pledge via Pledge.item_detail.
+    """
     class Meta:
-        model = RewardTier
+        model = ItemPledge
         fields = "__all__"
+
+    def validate_quantity(self, value):
+        """
+        Ensure pledged item quantity is > 0.
+        """
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Quantity must be at least 1."
+            )
+        return value
+
+
+# ====================================================================================
+# PLEDGE BASE + DETAIL SERIALIZERS
+# ====================================================================================
+
+class PledgeSerializer(serializers.ModelSerializer):
+    """
+    Basic pledge serializer.
+
+    Used for:
+    - listing pledges
+    - creating / updating pledges
+
+    Notes:
+    - supporter is read-only and comes from the logged-in user in the view
+    - supporter_username is a convenience field for the frontend. 
+    - The benefits are on the frontend, you don’t have to go look up the user’s username separately just to display “Janet pledged $50”.
+    """
+    supporter = serializers.ReadOnlyField(source="supporter.id")
+    supporter_username = serializers.ReadOnlyField(source="supporter.username")
+
+    class Meta:
+        model = Pledge
+        # includes model fields + extra declared fields like supporter_username
+        fields = "__all__"
+        read_only_fields = ["date_created", "date_updated"]
+
+
+class PledgeDetailSerializer(PledgeSerializer):
+    """
+    Detailed view of a pledge.
+
+    Includes:
+    - all base pledge fields
+    - money_detail / time_detail / item_detail (if present)
+    - human-readable fundraiser and need labels using __str__
+    - extra id/title/type fields to make relationships obvious
+    """
+
+    # Nested detail serializers (as you already had)
+    money_detail = MoneyPledgeSerializer(read_only=True)
+    time_detail = TimePledgeSerializer(read_only=True)
+    item_detail = ItemPledgeSerializer(read_only=True)
+
+    # Keep string labels for quick readability
+    fundraiser = serializers.StringRelatedField()
+    need = serializers.StringRelatedField()
+
+    # Extra helpers so you don't have to guess IDs
+    fundraiser_id = serializers.IntegerField(source="fundraiser.id", read_only=True)
+    fundraiser_title = serializers.CharField(source="fundraiser.title", read_only=True)
+
+    need_id = serializers.IntegerField(source="need.id", read_only=True)
+    need_title = serializers.CharField(source="need.title", read_only=True)
+    need_type = serializers.CharField(source="need.need_type", read_only=True)
+
+# ====================================================================================
+# NEED DETAIL SERIALIZER (USES PLEDGE SERIALIZER)
+# ====================================================================================
+
+class NeedDetailSerializer(NeedSerializer):
+    """
+    Detailed view of a single Need.
+
+    Includes:
+    - the base Need fields (from NeedSerializer)
+    - its MoneyNeed / TimeNeed / ItemNeed (via OneToOne relations)
+    - the pledges linked to this need
+    - extra fundraiser info for easier linking
+    """
+
+    fundraiser_id = serializers.IntegerField(source="fundraiser.id", read_only=True)
+    fundraiser_title = serializers.CharField(source="fundraiser.title", read_only=True)
+
+    money_detail = MoneyNeedSerializer(read_only=True)
+    time_detail = TimeNeedSerializer(read_only=True)
+    item_detail = ItemNeedSerializer(read_only=True)
+    pledges = serializers.SerializerMethodField()
+
+    def get_pledges(self, obj):
+        return PledgeSerializer(obj.pledges.all(), many=True).data
+
+
+
+# ====================================================================================
+# FUNDRAISER SERIALIZERS
+# ====================================================================================
+
+class FundraiserSerializer(serializers.ModelSerializer):
+    """
+    Basic Fundraiser serializer.
+
+    Used for:
+    - fundraiser list endpoint (GET /fundraisers/)
+    - fundraiser create / update
+
+    Notes:
+    - owner is read-only and set in the view as current user
+    - is_open is read-only and comes from the @property on the model
+    """
+    owner = serializers.ReadOnlyField(source="owner.id")
+    is_open = serializers.ReadOnlyField()  # uses the @property on the Fundraiser model
+
+    class Meta:
+        model = Fundraiser
+        fields = "__all__"
+        read_only_fields = ["date_created", "date_updated", "owner", "is_open"]
+
+
+class FundraiserDetailSerializer(FundraiserSerializer):
+    """
+    Detailed view of a Fundraiser.
+
+    Includes:
+    - all fundraiser fields (from FundraiserSerializer)
+    - its pledges (basic pledge info)
+    - its needs (basic need info)
+    - its reward tiers
+    """
+    pledges = PledgeSerializer(many=True, read_only=True)
+    needs = NeedSerializer(many=True, read_only=True)
+    reward_tiers = RewardTierSerializer(many=True, read_only=True)
