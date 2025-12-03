@@ -669,14 +669,39 @@ class ItemPledgeList(APIView):
         item_pledges = ItemPledge.objects.all()
         serializer = ItemPledgeSerializer(item_pledges, many=True)
         return Response(serializer.data)
-
+    
     def post(self, request):
         serializer = ItemPledgeSerializer(data=request.data)
         if serializer.is_valid():
             pledge = serializer.validated_data.get("pledge")
             self.check_object_permissions(request, pledge)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+            # Save the ItemPledge row
+            item_pledge = serializer.save()
+
+            # === NEW: auto-set reward tier based on donation vs loan ===
+            need = pledge.need
+            if need is not None and need.need_type == "item":
+                item_need = getattr(need, "item_detail", None)
+                if item_need is not None:
+                    chosen_mode = item_pledge.mode  # "donation" or "loan"
+
+                    if chosen_mode == "donation":
+                        tier = item_need.donation_reward_tier
+                    elif chosen_mode == "loan":
+                        tier = item_need.loan_reward_tier
+                    else:
+                        tier = None
+
+                    if tier is not None and pledge.reward_tier is None:
+                        pledge.reward_tier = tier
+                        pledge.save(update_fields=["reward_tier"])
+
+            return Response(
+                ItemPledgeSerializer(item_pledge).data,
+                status=status.HTTP_201_CREATED,
+            )
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
