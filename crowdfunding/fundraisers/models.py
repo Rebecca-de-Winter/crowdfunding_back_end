@@ -92,6 +92,15 @@ class Pledge(models.Model):
         related_name='pledges'
     )
 
+    reward_tier = models.ForeignKey(
+        "RewardTier",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pledges",
+        help_text="Which reward this pledge is getting, if any.",
+    )
+
     def __str__(self):
         return f"Pledge #{self.id} to {self.fundraiser.title}"
     # the string will tell us which pledge it is and to which fundraiser eg Pledge #1 to backyard festival.
@@ -264,10 +273,16 @@ class RewardTier(models.Model):
     )
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
-    min_contribution_value = models.DecimalField(max_digits=10, decimal_places=2)
+    minimum_contribution_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Minimum cash amount for this reward (used for money pledges only).",
+    )
     image_url = models.URLField(blank=True)
     sort_order = models.IntegerField(default=0)
-    max_backers = models.IntegerField(null=True, blank=True)
+    max_backers = models.PositiveIntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.name} ({self.fundraiser.title})" # Returns a string like "VIP Pass (FundraiserName)"

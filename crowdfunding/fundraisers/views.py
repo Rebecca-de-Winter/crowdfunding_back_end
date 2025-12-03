@@ -237,7 +237,7 @@ class NeedDetail(APIView):
         if need.pledges.exists():
             return Response(
                 {"detail": "Cannot delete a need that already has pledges. "
-                           "Set status='cancelled' instead."},
+                    "Set status='cancelled' instead."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         need.delete()
@@ -392,11 +392,11 @@ class TimeNeedList(APIView):
         serializer = TimeNeedSerializer(data=request.data)
         if serializer.is_valid():
             need = serializer.validated_data.get("need")
+            # Owner check: use the fundraiser that owns this need
             self.check_object_permissions(request, need.fundraiser)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            time_need = serializer.save()
+            return Response(TimeNeedSerializer(time_need).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 class TimeNeedDetail(APIView):
     """
@@ -591,11 +591,26 @@ class TimePledgeList(APIView):
         serializer = TimePledgeSerializer(data=request.data)
         if serializer.is_valid():
             pledge = serializer.validated_data.get("pledge")
+            # Check the supporter owns this pledge (existing behaviour)
             self.check_object_permissions(request, pledge)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+            # Save the TimePledge row
+            time_pledge = serializer.save()
+
+            # --- NEW: auto-assign reward tier from the TimeNeed ---
+            need = pledge.need  # the Need this pledge is attached to
+            if need is not None and need.need_type == "time":
+                # Get the TimeNeed detail row, if it exists
+                time_need = getattr(need, "time_detail", None)
+                if time_need is not None:
+                    tier = time_need.reward_tier
+                    # Only set if a tier is configured and pledge doesn't already have one
+                    if tier is not None and pledge.reward_tier is None:
+                        pledge.reward_tier = tier
+                        pledge.save(update_fields=["reward_tier"])
+
+            return Response(TimePledgeSerializer(time_pledge).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class TimePledgeDetail(APIView):
     """

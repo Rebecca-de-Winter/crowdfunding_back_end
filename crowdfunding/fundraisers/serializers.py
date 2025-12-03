@@ -34,13 +34,26 @@ class RewardTierSerializer(serializers.ModelSerializer):
 # ====================================================================================
 
 class MoneyNeedSerializer(serializers.ModelSerializer):
+    need_title = serializers.ReadOnlyField(source="need.title")
+    fundraiser_id = serializers.ReadOnlyField(source="need.fundraiser.id")
+    fundraiser_title = serializers.ReadOnlyField(source="need.fundraiser.title")
     """
     Extra details for money-type needs. Grabs all the fields. 
     One-to-one with Need via Need.money_detail. (Money_detail lives in models.py under "related name")
     """
     class Meta:
         model = MoneyNeed
-        fields = "__all__"
+        fields = [
+            "id",
+            "fundraiser_title",  # read-only
+            "fundraiser_id",     # read-only
+            "need_title",        # read-only
+            "need",              
+            "target_amount",
+            "comment",
+            
+            
+        ]
 
     def validate_target_amount(self, value):
         """
@@ -111,6 +124,8 @@ class ItemNeedSerializer(serializers.ModelSerializer):
 # ====================================================================================
 
 class NeedSerializer(serializers.ModelSerializer):
+
+    fundraiser_title = serializers.ReadOnlyField(source="fundraiser.title")
     """
     Basic Need serializer:
     - used for listing needs
@@ -248,6 +263,8 @@ class PledgeDetailSerializer(PledgeSerializer):
     need_id = serializers.IntegerField(source="need.id", read_only=True)
     need_title = serializers.CharField(source="need.title", read_only=True)
     need_type = serializers.CharField(source="need.need_type", read_only=True)
+    reward_tier_name = serializers.CharField(source="reward_tier.name", read_only=True)
+
 
 # ====================================================================================
 # NEED DETAIL SERIALIZER (USES PLEDGE SERIALIZER)
