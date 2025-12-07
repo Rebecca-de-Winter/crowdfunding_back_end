@@ -183,7 +183,7 @@ class NeedList(APIView):
     List all needs or create a new base Need.
     Only the owner of the associated fundraiser can create needs for it.
     """
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
 
     def get(self, request):
         needs = Need.objects.all()
@@ -193,6 +193,12 @@ class NeedList(APIView):
     def post(self, request):
         serializer = NeedSerializer(data=request.data)
         if serializer.is_valid():
+            # Pull the fundraiser from the validated data
+            fundraiser = serializer.validated_data.get("fundraiser")
+            # Check that the current user owns this fundraiser
+            self.check_object_permissions(request, fundraiser)
+
+            # Now it's safe to create the Need
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -209,6 +215,9 @@ class NeedDetail(APIView):
             need = Need.objects.get(pk=pk)
         except Need.DoesNotExist:
             raise Http404
+
+        # Enforce IsOwnerOrReadOnly on the Need object
+        self.check_object_permissions(self.request, need)
         return need
 
     def get(self, request, pk):
@@ -224,9 +233,8 @@ class NeedDetail(APIView):
             partial=True,
         )
         if serializer.is_valid():
-            # If fundraiser is being changed (unlikely), re-check owner
-            fundraiser = serializer.validated_data.get("fundraiser", need.fundraiser)
-            self.check_object_permissions(request, fundraiser)
+            # Optional: if you *really* wanted to guard changing fundraiser,
+            # you could re-check here, but for now simple is fine.
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -236,12 +244,15 @@ class NeedDetail(APIView):
         # Don't allow deleting a need that already has pledges
         if need.pledges.exists():
             return Response(
-                {"detail": "Cannot delete a need that already has pledges. "
-                    "Set status='cancelled' instead."},
+                {
+                    "detail": "Cannot delete a need that already has pledges. "
+                    "Set status='cancelled' instead."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         need.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 
 # ====================================================================================

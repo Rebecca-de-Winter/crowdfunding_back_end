@@ -194,11 +194,26 @@ class ItemPledgeSerializer(serializers.ModelSerializer):
     Extra details for an item pledge.
     One-to-one with Pledge via Pledge.item_detail.
     """
-    item_name = serializers.ReadOnlyField(source="pledge.need.item_detail.item_name")
+    item_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemPledge
         fields = "__all__"
+
+    def get_item_name(self, obj):
+        """
+        Safely walk pledge -> need -> item_detail.
+        If anything is missing, return None instead of erroring.
+        """
+        need = getattr(obj.pledge, "need", None)
+        if not need:
+            return None
+        
+        item_detail = getattr(need, "item_detail", None)
+        if not item_detail:
+            return None
+
+        return item_detail.item_name
 
     def validate_quantity(self, value):
         """
@@ -274,6 +289,7 @@ class PledgeDetailSerializer(PledgeSerializer):
 # ====================================================================================
 
 class NeedDetailSerializer(NeedSerializer):
+    
     """
     Detailed view of a single Need.
 
@@ -292,6 +308,9 @@ class NeedDetailSerializer(NeedSerializer):
     item_detail = ItemNeedSerializer(read_only=True)
     pledges = serializers.SerializerMethodField()
 
+    class Meta(NeedSerializer.Meta):
+        fields = NeedSerializer.Meta.fields
+        
     def get_pledges(self, obj):
         return PledgeSerializer(obj.pledges.all(), many=True).data
 
