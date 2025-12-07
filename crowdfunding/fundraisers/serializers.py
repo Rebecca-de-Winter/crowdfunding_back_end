@@ -194,6 +194,8 @@ class ItemPledgeSerializer(serializers.ModelSerializer):
     Extra details for an item pledge.
     One-to-one with Pledge via Pledge.item_detail.
     """
+    item_name = serializers.ReadOnlyField(source="pledge.need.item_detail.item_name")
+
     class Meta:
         model = ItemPledge
         fields = "__all__"
@@ -229,6 +231,16 @@ class PledgeSerializer(serializers.ModelSerializer):
     supporter = serializers.ReadOnlyField(source="supporter.id")
     supporter_username = serializers.ReadOnlyField(source="supporter.username")
 
+    # Relationship helpers
+    fundraiser_title = serializers.CharField(source="fundraiser.title", read_only=True)
+    fundraiser_id = serializers.IntegerField(source="fundraiser.id", read_only=True)
+
+    need_title = serializers.CharField(source="need.title", read_only=True)
+    need_id = serializers.IntegerField(source="need.id", read_only=True)
+    need_type = serializers.CharField(source="need.need_type", read_only=True)
+    reward_tier_name = serializers.CharField(source="reward_tier.name", read_only=True
+    )
+
     class Meta:
         model = Pledge
         # includes model fields + extra declared fields like supporter_username
@@ -255,15 +267,6 @@ class PledgeDetailSerializer(PledgeSerializer):
     # Keep string labels for quick readability
     fundraiser = serializers.StringRelatedField()
     need = serializers.StringRelatedField()
-
-    # Extra helpers so you don't have to guess IDs
-    fundraiser_id = serializers.IntegerField(source="fundraiser.id", read_only=True)
-    fundraiser_title = serializers.CharField(source="fundraiser.title", read_only=True)
-
-    need_id = serializers.IntegerField(source="need.id", read_only=True)
-    need_title = serializers.CharField(source="need.title", read_only=True)
-    need_type = serializers.CharField(source="need.need_type", read_only=True)
-    reward_tier_name = serializers.CharField(source="reward_tier.name", read_only=True)
 
 
 # ====================================================================================
