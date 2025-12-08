@@ -78,13 +78,13 @@ Authentication is via **Token Auth** using:
 
 ### Endpoints
 
-| URL                  | Method | Purpose                                | Request Body                                                                                                                   | Success | Auth       |
-| -------------------- | ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------- | ---------- |
-| `/fundraisers/`      | GET    | List all fundraisers                   | –                                                                                                                              | 200     | None       |
-| `/fundraisers/`      | POST   | Create a fundraiser                    | `title`, `description`, `goal`, `image_url`, `location`, `start_date`, `end_date`, `status?`, `enable_rewards?`, `sort_order?` | 201     | Logged-in  |
-| `/fundraisers/<id>/` | GET    | Retrieve a single fundraiser           | –                                                                                                                              | 200     | None       |
-| `/fundraisers/<id>/` | PUT    | Update fundraiser                      | Same fields as POST (partial updates allowed)                                                                                  | 200     | Owner only |
-| `/fundraisers/<id>/` | DELETE | Delete fundraiser (only if no pledges) | –                                                                                                                              | 204     | Owner only |
+| URL                  | Method | Purpose                                | Request Body                                                                                                                | Success | Auth       |
+| -------------------- | ------ | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------- | ---------- |
+| `/fundraisers/`      | GET    | List all fundraisers                   | –                                                                                                                           | 200     | None       |
+| `/fundraisers/`      | POST   | Create a fundraiser                    | `title`, `description`, `goal`, `image_url`, `location`, `start_date`, `end_date`, `status`, `enable_rewards`, `sort_order` | 201     | Logged-in  |
+| `/fundraisers/<id>/` | GET    | Retrieve a single fundraiser           | –                                                                                                                           | 200     | None       |
+| `/fundraisers/<id>/` | PUT    | Update fundraiser                      | Same fields as POST (partial updates allowed)                                                                               | 200     | Owner only |
+| `/fundraisers/<id>/` | DELETE | Delete fundraiser (only if no pledges) | –                                                                                                                           | 204     | Owner only |
 
 ### Example: Create Fundraiser (POST `/fundraisers/`)
 
@@ -105,13 +105,13 @@ Authentication is via **Token Auth** using:
 
 ## Needs (Base Need)
 
-| URL            | Method | Purpose                          | Request Body                                                                             | Success | Auth             |
-| -------------- | ------ | -------------------------------- | ---------------------------------------------------------------------------------------- | ------- | ---------------- |
-| `/needs/`      | GET    | List all needs                   | –                                                                                        | 200     | None             |
-| `/needs/`      | POST   | Create a base need               | `fundraiser`, `need_type`, `title`, `description`, `status?`, `priority?`, `sort_order?` | 201     | Fundraiser owner |
-| `/needs/<id>/` | GET    | Retrieve a single need           | –                                                                                        | 200     | None             |
-| `/needs/<id>/` | PUT    | Update need                      | Same fields as POST (partial updates allowed)                                            | 200     | Fundraiser owner |
-| `/needs/<id>/` | DELETE | Delete need (only if no pledges) | –                                                                                        | 204     | Fundraiser owner |
+| URL            | Method | Purpose                          | Request Body                                                                          | Success | Auth             |
+| -------------- | ------ | -------------------------------- | ------------------------------------------------------------------------------------- | ------- | ---------------- |
+| `/needs/`      | GET    | List all needs                   | –                                                                                     | 200     | None             |
+| `/needs/`      | POST   | Create a base need               | `fundraiser`, `need_type`, `title`, `description`, `status`, `priority`, `sort_order` | 201     | Fundraiser owner |
+| `/needs/<id>/` | GET    | Retrieve a single need           | –                                                                                     | 200     | None             |
+| `/needs/<id>/` | PUT    | Update need                      | Same fields as POST (partial updates allowed)                                         | 200     | Fundraiser owner |
+| `/needs/<id>/` | DELETE | Delete need (only if no pledges) | –                                                                                     | 204     | Fundraiser owner |
 
 Example: Create Need (POST/Needs)
 
@@ -134,13 +134,13 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Money Need
 
-| URL                  | Method | Purpose              | Request Body                        | Success | Auth             |
-| -------------------- | ------ | -------------------- | ----------------------------------- | ------- | ---------------- |
-| `/money-needs/`      | GET    | List all money needs | –                                   | 200     | None             |
-| `/money-needs/`      | POST   | Create MoneyNeed     | `need`, `target_amount`, `comment?` | 201     | Fundraiser owner |
-| `/money-needs/<id>/` | GET    | Retrieve MoneyNeed   | –                                   | 200     | None             |
-| `/money-needs/<id>/` | PUT    | Update MoneyNeed     | `target_amount?`, `comment?`        | 200     | Fundraiser owner |
-| `/money-needs/<id>/` | DELETE | Delete MoneyNeed     | –                                   | 204     | Fundraiser owner |
+| URL                  | Method | Purpose              | Request Body                       | Success | Auth             |
+| -------------------- | ------ | -------------------- | ---------------------------------- | ------- | ---------------- |
+| `/money-needs/`      | GET    | List all money needs | –                                  | 200     | None             |
+| `/money-needs/`      | POST   | Create MoneyNeed     | `need`, `target_amount`, `comment` | 201     | Fundraiser owner |
+| `/money-needs/<id>/` | GET    | Retrieve MoneyNeed   | –                                  | 200     | None             |
+| `/money-needs/<id>/` | PUT    | Update MoneyNeed     | `target_amount`, `comment`         | 200     | Fundraiser owner |
+| `/money-needs/<id>/` | DELETE | Delete MoneyNeed     | –                                  | 204     | Fundraiser owner |
 
 ### Example Create Money Need (POST/money-needs)
 
