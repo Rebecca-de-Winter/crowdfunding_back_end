@@ -126,6 +126,10 @@ class ItemNeedSerializer(serializers.ModelSerializer):
 class NeedSerializer(serializers.ModelSerializer):
 
     fundraiser_title = serializers.ReadOnlyField(source="fundraiser.title")
+    fundraiser_owner_username = serializers.ReadOnlyField(
+    source="fundraiser.owner.username"
+)
+
     """
     Basic Need serializer:
     - used for listing needs
@@ -310,7 +314,7 @@ class NeedDetailSerializer(NeedSerializer):
 
     class Meta(NeedSerializer.Meta):
         fields = NeedSerializer.Meta.fields
-        
+
     def get_pledges(self, obj):
         return PledgeSerializer(obj.pledges.all(), many=True).data
 
