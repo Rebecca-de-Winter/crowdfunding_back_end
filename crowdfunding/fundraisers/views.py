@@ -768,6 +768,11 @@ class ItemPledgeDetail(APIView):
 # REPORTS
 # ====================================================================================
 
+from django.db.models import Sum, Count
+from decimal import Decimal
+
+# ... other imports above ...
+
 class FundraiserSummaryReport(APIView):
     """
     Read-only summary for a single fundraiser.
@@ -778,8 +783,8 @@ class FundraiserSummaryReport(APIView):
 
     Returns a big JSON blob with:
     - money: targets, pledged, remaining, percentages
-    - time: shifts needed vs pledged
-    - items: quantities needed vs pledged
+    - time: shifts needed vs volunteers, with per-shift detail
+    - items: quantities needed vs pledged, with per-item detail
     - needs: breakdown by type and status
     - pledges: breakdown by type
     """
@@ -798,77 +803,191 @@ class FundraiserSummaryReport(APIView):
         # ------------------------------------------------------------------
         # MONEY SECTION
         # ------------------------------------------------------------------
-        # 1) Total money "target" from all MoneyNeeds for this fundraiser
-        money_target = (
-            MoneyNeed.objects.filter(need__fundraiser=fundraiser)
-            .aggregate(total=Sum("target_amount"))["total"]
-            or Decimal("0")
+        goal = fundraiser.goal or Decimal("0")
+
+        # Query all MoneyNeeds for this fundraiser
+        money_needs_qs = MoneyNeed.objects.filter(need__fundraiser=fundraiser).select_related(
+            "need"
         )
 
-        # 2) Total money pledged (only from active-ish pledges)
-        money_pledged = (
+        # Sum of all money targets from MoneyNeeds
+        money_target = (
+            money_needs_qs.aggregate(total=Sum("target_amount"))["total"]
+            or Decimal("0")
+        )
+        unallocated_goal_amount = max(goal - money_target, Decimal("0"))
+
+
+        # Total money pledged (for this fundraiser, any money pledge)
+        money_pledged_total = (
             MoneyPledge.objects.filter(
                 pledge__fundraiser=fundraiser,
                 pledge__status__in=active_statuses,
-            )
-            .aggregate(total=Sum("amount"))["total"]
+            ).aggregate(total=Sum("amount"))["total"]
             or Decimal("0")
         )
 
-        # 3) Remaining money needed (never negative)
-        money_remaining = max(money_target - money_pledged, Decimal("0"))
+        # Remaining against the *MoneyNeeds* themselves
+        money_remaining_against_needs = max(money_target - money_pledged_total, Decimal("0"))
 
-        # 4) Percent of fundraiser.goal filled by money pledges
-        goal = fundraiser.goal or Decimal("0")
+        # % of overall fundraiser goal covered by money pledges
         if goal > 0:
-            percent_of_goal = (money_pledged / goal) * Decimal("100")
+            percent_of_goal = (money_pledged_total / goal) * Decimal("100")
         else:
-            percent_of_goal = None  # no goal set
+            percent_of_goal = None
 
-        # 5) Percent of total MoneyNeeds covered
+        # % of explicit MoneyNeeds covered
         if money_target > 0:
-            percent_of_money_needs = (money_pledged / money_target) * Decimal("100")
+            percent_of_money_needs = (money_pledged_total / money_target) * Decimal("100")
         else:
-            percent_of_money_needs = None  # avoids divide-by-zero
+            percent_of_money_needs = None
+
+        # --- Per-money-need breakdown (so you can see which bucket is which) ---
+        money_needs_list = []
+        for mn in money_needs_qs:
+            need = mn.need
+
+            # Money pledged specifically to this need
+            pledged_for_need = (
+                MoneyPledge.objects.filter(
+                    pledge__need=need,
+                    pledge__status__in=active_statuses,
+                ).aggregate(total=Sum("amount"))["total"]
+                or Decimal("0")
+            )
+
+            remaining_for_need = max(mn.target_amount - pledged_for_need, Decimal("0"))
+
+            if pledged_for_need == 0:
+                coverage_status = "unfilled"
+            elif remaining_for_need == 0:
+                coverage_status = "filled"
+            else:
+                coverage_status = "partial"
+
+            money_needs_list.append(
+                {
+                    "need_id": need.id,
+                    "need_title": need.title,
+                    "target_amount": str(mn.target_amount),
+                    "money_pledged": str(pledged_for_need),
+                    "money_remaining": str(remaining_for_need),
+                    "coverage_status": coverage_status,
+                }
+            )
 
         # ------------------------------------------------------------------
-        # TIME SECTION (volunteer shifts)
+        # TIME SECTION (volunteer shifts, per TimeNeed)
         # ------------------------------------------------------------------
-        time_needs_qs = TimeNeed.objects.filter(need__fundraiser=fundraiser)
-        total_time_needs = time_needs_qs.count()
-
-        time_pledges_qs = TimePledge.objects.filter(
-            pledge__fundraiser=fundraiser,
-            pledge__status__in=active_statuses,
+        time_needs_qs = TimeNeed.objects.filter(need__fundraiser=fundraiser).select_related(
+            "need"
         )
-        total_time_pledges = time_pledges_qs.count()
 
-        time_needs_remaining = max(total_time_needs - total_time_pledges, 0)
+        total_shifts_needed = 0
+        total_shifts_with_volunteers = 0
+        time_needs_detail = []
 
-        # NOTE: Later we could add "hours_needed" vs "hours_committed",
-        # but for now we keep it as simple "shifts".
+        for tn in time_needs_qs:
+            total_shifts_needed += 1
+
+            # All active time pledges for this specific Need
+            pledges_for_need = TimePledge.objects.filter(
+                pledge__need=tn.need,
+                pledge__status__in=active_statuses,
+            )
+
+            volunteers_pledged = pledges_for_need.count()
+            volunteers_remaining = max(tn.volunteers_needed - volunteers_pledged, 0)
+
+            if volunteers_pledged == 0:
+                coverage_status = "unfilled"
+            elif volunteers_remaining == 0:
+                coverage_status = "filled"
+            else:
+                coverage_status = "partial"
+
+            if volunteers_pledged > 0:
+                total_shifts_with_volunteers += 1
+
+            time_needs_detail.append({
+                "need_id": tn.need.id,
+                "need_title": tn.need.title,
+                "role_title": tn.role_title,
+                "location": tn.location,
+                "shift_start": tn.start_datetime,
+                "shift_end": tn.end_datetime,
+                "volunteers_needed": tn.volunteers_needed,
+                "volunteers_pledged": volunteers_pledged,
+                "volunteers_remaining": volunteers_remaining,
+                "coverage_status": coverage_status,
+            })
+
+        shifts_without_volunteers = max(total_shifts_needed - total_shifts_with_volunteers, 0)
+
+        if total_shifts_needed > 0:
+            percent_shifts_filled = (
+                Decimal(total_shifts_with_volunteers) / Decimal(total_shifts_needed)
+            ) * Decimal("100")
+        else:
+            percent_shifts_filled = None
 
         # ------------------------------------------------------------------
-        # ITEM SECTION (quantities of stuff)
+        # ITEM SECTION (per ItemNeed)
         # ------------------------------------------------------------------
-        item_needs_qs = ItemNeed.objects.filter(need__fundraiser=fundraiser)
-        total_item_needs = item_needs_qs.count()
-
-        total_item_qty_needed = (
-            item_needs_qs.aggregate(total=Sum("quantity_needed"))["total"] or 0
+        item_needs_qs = ItemNeed.objects.filter(need__fundraiser=fundraiser).select_related(
+            "need"
         )
 
-        item_pledges_qs = ItemPledge.objects.filter(
-            pledge__fundraiser=fundraiser,
-            pledge__status__in=active_statuses,
-        )
-        total_item_pledges = item_pledges_qs.count()
+        total_item_needs = 0
+        total_item_qty_needed = 0
+        total_item_qty_pledged = 0
+        item_needs_detail = []
 
-        total_item_qty_pledged = (
-            item_pledges_qs.aggregate(total=Sum("quantity"))["total"] or 0
-        )
+        for ineed in item_needs_qs:
+            total_item_needs += 1
+
+            quantity_needed = ineed.quantity_needed
+
+            # All active item pledges for this Need
+            quantity_pledged = (
+                ItemPledge.objects.filter(
+                    pledge__need=ineed.need,
+                    pledge__status__in=active_statuses,
+                ).aggregate(total=Sum("quantity"))["total"]
+                or 0
+            )
+
+            total_item_qty_needed += quantity_needed
+            total_item_qty_pledged += quantity_pledged
+
+            quantity_remaining = max(quantity_needed - quantity_pledged, 0)
+
+            if quantity_pledged == 0:
+                coverage_status = "unfilled"
+            elif quantity_remaining == 0:
+                coverage_status = "filled"
+            else:
+                coverage_status = "partial"
+
+            item_needs_detail.append({
+                "need_id": ineed.need.id,
+                "need_title": ineed.need.title,
+                "item_name": ineed.item_name,
+                "quantity_needed": quantity_needed,
+                "quantity_pledged": quantity_pledged,
+                "quantity_remaining": quantity_remaining,
+                "mode": ineed.mode,
+                "coverage_status": coverage_status,
+            })
 
         item_qty_remaining = max(total_item_qty_needed - total_item_qty_pledged, 0)
+
+        if total_item_qty_needed > 0:
+            percent_items_filled_by_quantity = (
+                Decimal(total_item_qty_pledged) / Decimal(total_item_qty_needed)
+            ) * Decimal("100")
+        else:
+            percent_items_filled_by_quantity = None
 
         # ------------------------------------------------------------------
         # NEEDS: breakdown by type and status
@@ -878,12 +997,10 @@ class FundraiserSummaryReport(APIView):
         needs_by_type = list(
             needs_qs.values("need_type").annotate(count=Count("id")).order_by("need_type")
         )
-        # Example entry: {"need_type": "money", "count": 3}
 
         needs_by_status = list(
             needs_qs.values("status").annotate(count=Count("id")).order_by("status")
         )
-        # Example entry: {"status": "open", "count": 5}
 
         total_needs = needs_qs.count()
 
@@ -908,25 +1025,46 @@ class FundraiserSummaryReport(APIView):
                 "id": fundraiser.id,
                 "title": fundraiser.title,
                 "status": fundraiser.status,
-                "goal": str(fundraiser.goal),  # Decimal -> string for JSON safety
+                "goal": str(fundraiser.goal),
             },
             "money": {
+                # Big-picture target
+                "goal_target": str(goal),
+
+                # Sum of all MoneyNeeds
                 "total_target_from_money_needs": str(money_target),
-                "total_pledged": str(money_pledged),
-                "remaining": str(money_remaining),
+
+                # Unallocated amount aka goal - money needs. 
+                "unallocated_goal_amount": str(unallocated_goal_amount),
+
+                # All money pledges for this fundraiser
+                "total_pledged": str(money_pledged_total),
+
+                # How far we are from fully covering the MoneyNeeds
+                "remaining_against_money_needs": str(money_remaining_against_needs),
+
                 "percent_of_goal": float(percent_of_goal) if percent_of_goal is not None else None,
-                "percent_of_money_needs": float(percent_of_money_needs) if percent_of_money_needs is not None else None,
+                "percent_of_money_needs": float(percent_of_money_needs)
+                if percent_of_money_needs is not None
+                else None,
+
+                # NEW: breakdown by each MoneyNeed (venue hire, pizza, posters, etc.)
+                "money_needs": money_needs_list,
             },
             "time": {
-                "total_time_needs": total_time_needs,          # number of TimeNeed rows
-                "total_time_pledges": total_time_pledges,      # number of TimePledge rows
-                "time_needs_remaining": time_needs_remaining,  # how many shifts still need people
+                "total_shifts_needed": total_shifts_needed,
+                "shifts_with_volunteers": total_shifts_with_volunteers,
+                "shifts_without_volunteers": shifts_without_volunteers,
+                "percent_shifts_filled": float(percent_shifts_filled) if percent_shifts_filled is not None else None,
+                "shifts": time_needs_detail,
             },
             "items": {
-                "total_item_needs": total_item_needs,                 # number of ItemNeed rows
-                "total_quantity_needed": total_item_qty_needed,       # sum of quantity_needed
-                "total_quantity_pledged": total_item_qty_pledged,     # sum of ItemPledge.quantity
+                "total_item_needs": total_item_needs,
+                "total_quantity_needed": total_item_qty_needed,
+                "total_quantity_pledged": total_item_qty_pledged,
                 "quantity_remaining": item_qty_remaining,
+                "percent_items_filled_by_quantity": float(percent_items_filled_by_quantity) if percent_items_filled_by_quantity is not None else None,
+                "item_needs": item_needs_detail,
             },
             "needs_summary": {
                 "total_needs": total_needs,
@@ -942,6 +1080,7 @@ class FundraiserSummaryReport(APIView):
         }
 
         return Response(data)
+
 
 
 class NeedProgressReport(APIView):
@@ -1105,3 +1244,138 @@ class MyFundraisersReport(APIView):
             })
 
         return Response(results)
+    
+class FundraiserPledgesReport(APIView):
+    """
+    Detailed pledge report for a single fundraiser.
+
+    URL: /reports/fundraisers/<pk>/pledges/
+
+    Only the fundraiser owner can access this.
+
+    Returns:
+    - fundraiser: basic info
+    - totals: money, time hours, item quantities
+    - pledges: list of pledges with supporter + need fields
+    """
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly]
+
+    def get_object(self, pk):
+        try:
+            fundraiser = Fundraiser.objects.get(pk=pk)
+        except Fundraiser.DoesNotExist:
+            raise Http404
+
+        # Enforce that only the owner can see this report
+        self.check_object_permissions(self.request, fundraiser)
+        return fundraiser
+
+    def get(self, request, pk):
+        fundraiser = self.get_object(pk)
+        active_statuses = ["pending", "approved"]
+
+        # All active pledges for this fundraiser
+        pledges_qs = Pledge.objects.filter(
+            fundraiser=fundraiser,
+            status__in=active_statuses,
+        ).select_related("supporter", "need", "reward_tier")
+
+        total_pledges = pledges_qs.count()
+
+        # Money / time / item totals across those pledges
+        total_money_pledged = (
+            MoneyPledge.objects.filter(pledge__in=pledges_qs)
+            .aggregate(total=Sum("amount"))["total"]
+            or Decimal("0")
+        )
+        total_time_hours = (
+            TimePledge.objects.filter(pledge__in=pledges_qs)
+            .aggregate(total=Sum("hours_committed"))["total"]
+            or Decimal("0")
+        )
+        total_item_quantity = (
+            ItemPledge.objects.filter(pledge__in=pledges_qs)
+            .aggregate(total=Sum("quantity"))["total"]
+            or 0
+        )
+
+        # Serialize each pledge with your existing PledgeSerializer
+        pledges_data = PledgeSerializer(pledges_qs, many=True).data
+
+        data = {
+            "fundraiser": {
+                "id": fundraiser.id,
+                "title": fundraiser.title,
+                "status": fundraiser.status,
+                "goal": str(fundraiser.goal),
+            },
+            "totals": {
+                "total_pledges": total_pledges,
+                "total_money_pledged": str(total_money_pledged),
+                "total_time_hours_pledged": str(total_time_hours),
+                "total_item_quantity_pledged": total_item_quantity,
+            },
+            "pledges": pledges_data,
+        }
+
+        return Response(data)
+
+
+class MyPledgesReport(APIView):
+    """
+    Dashboard-style summary of pledges for the current supporter.
+
+    URL: /reports/my-pledges/
+
+    Returns:
+    - supporter: username / id
+    - totals: across all active pledges
+    - pledges: flat list of pledges with fundraiser + need info
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        supporter = request.user
+        active_statuses = ["pending", "approved"]
+
+        pledges_qs = Pledge.objects.filter(
+            supporter=supporter,
+            status__in=active_statuses,
+        ).select_related("fundraiser", "need", "reward_tier")
+
+        total_pledges = pledges_qs.count()
+
+        total_money_pledged = (
+            MoneyPledge.objects.filter(pledge__in=pledges_qs)
+            .aggregate(total=Sum("amount"))["total"]
+            or Decimal("0")
+        )
+        total_time_hours = (
+            TimePledge.objects.filter(pledge__in=pledges_qs)
+            .aggregate(total=Sum("hours_committed"))["total"]
+            or Decimal("0")
+        )
+        total_item_quantity = (
+            ItemPledge.objects.filter(pledge__in=pledges_qs)
+            .aggregate(total=Sum("quantity"))["total"]
+            or 0
+        )
+
+        pledges_data = PledgeSerializer(pledges_qs, many=True).data
+
+        data = {
+            "supporter": {
+                "id": supporter.id,
+                "username": supporter.username,
+            },
+            "totals": {
+                "total_pledges": total_pledges,
+                "total_money_pledged": str(total_money_pledged),
+                "total_time_hours_pledged": str(total_time_hours),
+                "total_item_quantity_pledged": total_item_quantity,
+            },
+            "pledges": pledges_data,
+        }
+
+        return Response(data)
+
