@@ -113,13 +113,50 @@ class FundraiserDetail(APIView):
 class PledgeList(APIView):
     """
     List all pledges or create a new pledge.
-    Supporter is set from request.user on creation.
+
+    GET supports filters:
+    - /pledges/?fundraiser=8
+    - /pledges/?need=5
+    - /pledges/?status=pending
+    - /pledges/?supporter=3
+    - /pledges/?type=money|time|item
+
+    Supporter is set from request.user on creation (POST).
     """
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get(self, request):
-        pledges = Pledge.objects.all()
-        serializer = PledgeSerializer(pledges, many=True)
+        fundraiser_id = request.query_params.get("fundraiser")
+        need_id = request.query_params.get("need")
+        status_param = request.query_params.get("status")
+        supporter_id = request.query_params.get("supporter")
+        pledge_type = request.query_params.get("type")  # "money", "time", "item"
+
+        qs = Pledge.objects.all().select_related("fundraiser", "need", "supporter", "reward_tier")
+
+        if fundraiser_id:
+            qs = qs.filter(fundraiser_id=fundraiser_id)
+
+        if need_id:
+            qs = qs.filter(need_id=need_id)
+
+        if status_param:
+            qs = qs.filter(status__iexact=status_param)
+
+        if supporter_id:
+            qs = qs.filter(supporter_id=supporter_id)
+
+        # filter by whether it has money_detail / time_detail / item_detail
+        if pledge_type:
+            pledge_type = pledge_type.lower()
+            if pledge_type == "money":
+                qs = qs.filter(money_detail__isnull=False)
+            elif pledge_type == "time":
+                qs = qs.filter(time_detail__isnull=False)
+            elif pledge_type == "item":
+                qs = qs.filter(item_detail__isnull=False)
+
+        serializer = PledgeSerializer(qs, many=True)
         return Response(serializer.data)
 
     def post(self, request):
@@ -128,6 +165,7 @@ class PledgeList(APIView):
             serializer.save(supporter=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 class PledgeDetail(APIView):
@@ -184,13 +222,34 @@ class PledgeDetail(APIView):
 class NeedList(APIView):
     """
     List all needs or create a new base Need.
-    Only the owner of the associated fundraiser can create needs for it.
+
+    GET supports filters via query params:
+    - /needs/?fundraiser=8
+    - /needs/?fundraiser=8&need_type=money
+    - /needs/?fundraiser=8&status=pending
+
+    Only the owner of the associated fundraiser can create needs for it (POST).
     """
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
 
     def get(self, request):
-        needs = Need.objects.all()
-        serializer = NeedSerializer(needs, many=True)
+        fundraiser_id = request.query_params.get("fundraiser")
+        need_type = request.query_params.get("need_type") or request.query_params.get("type")
+        status_param = request.query_params.get("status")
+
+        qs = Need.objects.all()
+
+        if fundraiser_id:
+            qs = qs.filter(fundraiser_id=fundraiser_id)
+
+        if need_type:
+            # normalise to lower-case, matches e.g. "money", "time", "item"
+            qs = qs.filter(need_type__iexact=need_type)
+
+        if status_param:
+            qs = qs.filter(status__iexact=status_param)
+
+        serializer = NeedSerializer(qs, many=True)
         return Response(serializer.data)
     
     def post(self, request):
