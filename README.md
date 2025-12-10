@@ -95,7 +95,7 @@ Ensure JSON has fields including:
 - Status: 201 Created
 - Body: JSON with the new user’s data (ID, username, email, etc. – password will not be returned).
 
-![POST Users](image-28.png)
+![POST Users](docs/image-28.png)
 
 ### 2. Obtain an authentication token
 
@@ -110,7 +110,7 @@ Ensure JSON has fields including:
 - Body: JSON containing token field
 - Copy token
 
-![TOKEN FIELD](image-29.png)
+![TOKEN FIELD](docs/image-29.png)
 
 #### 3. Copy and paste authentication token in auth tab in Insomnia
 
@@ -122,7 +122,7 @@ Ensure JSON has fields including:
 
 - Use this token to create any endpoint that requires a logged in user (eg. creating a fundraiser, pledging etc)
 
-![AUTH TAB](image-30.png)
+![AUTH TAB](docs/image-30.png)
 
 #### 5. Create a new fundraiser
 
@@ -133,7 +133,7 @@ Ensure JSON has fields including:
 - Ensure correct token is inserted into Auth
 - POST as shown below using JSON in the body.
 
-![POST Fundraiser](image-31.png)
+![POST Fundraiser](docs/image-31.png)
 
 #### Expected response
 
@@ -165,15 +165,15 @@ Authentication is via **Token Auth** using:
 
 ### Example: Get Users (GET/users)
 
-![GET Users](image-10.png)
+![GET Users](docs/image-10.png)
 
 ### Example: Create Users (POST/users)
 
-![POST Users](image-12.png)
+![POST Users](docs/image-12.png)
 
 ### Example: Get Token (POST/api-token-auth/)
 
-![GET Token](image-13.png)
+![GET Token](docs/image-13.png)
 
 ## Fundraisers
 
@@ -204,11 +204,11 @@ Authentication is via **Token Auth** using:
 
 ### Example: Get Fundraiser (GET/fundraisers)
 
-![GET Fundraiser](image-3.png)
+![GET Fundraiser](docs/image-3.png)
 
 ### Example: Create Fundraiser (POST/fundraisers/)
 
-![POST Fundraiser](image-4.png)
+![POST Fundraiser](docs/image-4.png)
 
 ## Needs (Base Need)
 
@@ -237,11 +237,11 @@ Authentication is via **Token Auth** using:
 
 ### Example: Get Needs (GET/needs)
 
-![Get Needs](image-5.png)
+![Get Needs](docs/image-5.png)
 
 ### Example: Post Needs (POST/needs)
 
-![Post Needs](image-6.png)
+![Post Needs](docs/image-6.png)
 
 ## Need Detail Models
 
@@ -270,11 +270,11 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Get Money Need (GET/money-needs)
 
-![GET Money Needs](image-7.png)
+![GET Money Needs](docs/image-7.png)
 
 ### Example: Create Money Need (POST/money-needs)
 
-![POST Money Needs](image-8.png)
+![POST Money Needs](docs/image-8.png)
 
 ## Time Need
 
@@ -288,11 +288,11 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: GET Time Needs (GET/time-needs)
 
-![GET Time Needs](image-14.png)
+![GET Time Needs](docs/image-14.png)
 
 ### Example: POST Time Needs (POST/time-needs)
 
-![POST Time Needs](image-15.png)
+![POST Time Needs](docs/image-15.png)
 
 ### Item Need
 
@@ -306,11 +306,11 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Get Item Needs (GET/item-needs)
 
-![GET Item Needs](image-16.png)
+![GET Item Needs](docs/image-16.png)
 
 ### Example: Create Item Needs (POST/item-needs)
 
-![POST Item Needs](image-17.png)
+![POST Item Needs](docs/image-17.png)
 
 ## Pledges
 
@@ -326,11 +326,11 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Get Pledge (GET/pledges)
 
-![GET Pledges](image-18.png)
+![GET Pledges](docs/image-18.png)
 
 ### Example: Create Pledges (POST/pledges)
 
-![POST Pledges](image-19.png)
+![POST Pledges](docs/image-19.png)
 
 ## Pledge Detail Models
 
@@ -345,7 +345,7 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Get Money Pledge (GET/money-pledges)
 
-![GET Money Pledge](image-20.png)
+![GET Money Pledge](docs/image-20.png)
 
 ### Example: Create Money Pledge (POST/money-pledges)
 
@@ -362,11 +362,11 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Get Time Pledge (GET/time-pledges)
 
-![GET Time Pledges](image-22.png)
+![GET Time Pledges](docs/image-22.png)
 
 ### Example: Create Time Pledges (POST/time-pledges)
 
-![POST Time Pledges](image-23.png)
+![POST Time Pledges](docs/image-23.png)
 
 ### Item Pledge
 
@@ -379,11 +379,11 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Get Item Pledge (GET/item-pledges)
 
-![GET Item Pledges](image-24.png)
+![GET Item Pledges](docs/image-24.png)
 
 ### Example: Create Item Pledges (POST/item-pledges)
 
-![POST Item Pledges](image-25.png)
+![POST Item Pledges](docs/image-25.png)
 
 ### Reward Tiers
 
@@ -399,11 +399,11 @@ Reward tiers can be optionally linked to MoneyNeed, TimeNeed or ItemNeed and all
 
 ### Example: Get Reward Tier (GET/reward-tiers/)
 
-![GET Reward Tiers](image-26.png)
+![GET Reward Tiers](docs/image-26.png)
 
 ### Example: Create Reward Tier (POST/reward-tiers/)
 
-![POST Reward Tiers](image-27.png)
+![POST Reward Tiers](docs/image-27.png)
 
 ## Reporting Endpoints
 
