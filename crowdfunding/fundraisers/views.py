@@ -2,6 +2,7 @@ from django.http import Http404
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
 
 from django.db.models import Sum, Count
 from django.db.models.functions import Coalesce
@@ -37,6 +38,8 @@ from .serializers import (
     TimePledgeSerializer,
     ItemPledgeSerializer,
     FundraiserTemplateSerializer,
+    TemplateNeedSerializer,         
+    TemplateRewardTierSerializer,  
 )
 from .permissions import IsOwnerOrReadOnly, IsSupporterOrReadOnly
 
@@ -1602,26 +1605,42 @@ class MyPledgesReport(APIView):
 
 ###################################################################################
 
-class FundraiserTemplateList(APIView):
-    """
-    List all active fundraiser templates.
-    For now, read-only. Templates are managed in the Django admin.
-    """
+# ====================================================================================
+# FUNDRAISER TEMPLATES
+# ====================================================================================
 
-    permission_classes = [permissions.AllowAny]
+class FundraiserTemplateListCreate(APIView):
+    """
+    GET: list all active fundraiser templates
+    POST: create a new fundraiser template
+    """
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get(self, request):
-        qs = FundraiserTemplate.objects.filter(is_active=True)
-        serializer = FundraiserTemplateSerializer(qs, many=True)
+        templates = FundraiserTemplate.objects.filter(is_active=True)
+        serializer = FundraiserTemplateSerializer(templates, many=True)
         return Response(serializer.data)
+
+    def post(self, request):
+        serializer = FundraiserTemplateSerializer(data=request.data)
+        if serializer.is_valid():
+            template = serializer.save(
+                owner=request.user if request.user.is_authenticated else None
+            )
+            return Response(
+                FundraiserTemplateSerializer(template).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class FundraiserTemplateDetail(APIView):
     """
-    Retrieve a single fundraiser template with its needs + reward tiers.
+    GET: retrieve a single template (with its needs + reward tiers)
+    PUT/PATCH: update template
+    DELETE: delete template
     """
-
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_object(self, pk):
         try:
@@ -1634,16 +1653,42 @@ class FundraiserTemplateDetail(APIView):
         serializer = FundraiserTemplateSerializer(template)
         return Response(serializer.data)
 
+    def put(self, request, pk):
+        template = self.get_object(pk)
+        serializer = FundraiserTemplateSerializer(template, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, pk):
+        template = self.get_object(pk)
+        serializer = FundraiserTemplateSerializer(
+            template, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        template = self.get_object(pk)
+        template.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 class ApplyTemplateToFundraiser(APIView):
     """
-    Apply a template to an existing fundraiser.
+    POST: Apply a FundraiserTemplate to an existing Fundraiser.
 
-    - Only the fundraiser owner can do this.
-    - Creates:
-      - RewardTiers from TemplateRewardTier
-      - Needs from TemplateNeed
-      - MoneyNeed / TimeNeed / ItemNeed with the correct fields
-      - Wires TimeNeed / ItemNeed to the newly created RewardTiers.
+    Expected JSON body:
+    {
+        "fundraiser_id": 1,
+        "template_id": 2
+    }
+
+    Rules:
+    - Only the owner of the fundraiser can apply a template.
+    - The fundraiser must be "empty" (no existing needs or reward tiers).
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -1652,125 +1697,277 @@ class ApplyTemplateToFundraiser(APIView):
         fundraiser_id = request.data.get("fundraiser_id")
         template_id = request.data.get("template_id")
 
+        # Basic body validation
         if not fundraiser_id or not template_id:
             return Response(
                 {"detail": "fundraiser_id and template_id are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 1. Get fundraiser + ownership check
+        # 1) Fetch fundraiser (must be owned by the current user)
         try:
-            fundraiser = Fundraiser.objects.get(pk=fundraiser_id)
+            fundraiser = Fundraiser.objects.get(
+                pk=fundraiser_id,
+                owner=request.user,
+            )
         except Fundraiser.DoesNotExist:
-            return Response(
-                {"detail": "Fundraiser not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise Http404("Fundraiser not found, or you do not own it.")
 
-        if fundraiser.owner != request.user:
-            return Response(
-                {"detail": "You can only apply templates to your own fundraisers."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # 2) Refuse to apply if fundraiser already has content
+        if fundraiser.needs.exists() or fundraiser.reward_tiers.exists():
+            raise ValidationError({
+                "detail": (
+                    "This fundraiser already has needs or reward tiers. "
+                    "Templates can only be applied to an empty fundraiser."
+                )
+            })
 
-        # 2. Get template
+        # 3) Fetch template
         try:
-            template = FundraiserTemplate.objects.get(pk=template_id, is_active=True)
+            template = FundraiserTemplate.objects.get(
+                pk=template_id,
+                is_active=True,
+            )
         except FundraiserTemplate.DoesNotExist:
-            return Response(
-                {"detail": "Template not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise Http404("Template not found or not active.")
 
-        created_need_ids = []
-        created_reward_tier_ids = []
+        # 4) Copy top-level fields from template onto fundraiser
+        if template.title:
+            fundraiser.title = template.title
+        if template.description:
+            fundraiser.description = template.description
+        if template.goal is not None:
+            fundraiser.goal = template.goal
+        if template.image_url:
+            fundraiser.image_url = template.image_url
+        if template.location:
+            fundraiser.location = template.location
+        fundraiser.enable_rewards = template.enable_rewards
+        fundraiser.save()
 
-        # 3. First create RewardTiers from TemplateRewardTier
-        tier_map = {}  # template_tier_id -> real RewardTier
-        for t_tier in template.template_reward_tiers.all():
-            tier = RewardTier.objects.create(
+        # 5) Copy TemplateRewardTier -> RewardTier
+        template_to_real_reward = {}
+        for trt in template.template_reward_tiers.all():
+            rt = RewardTier.objects.create(
                 fundraiser=fundraiser,
-                reward_type=t_tier.reward_type,
-                name=t_tier.name,
-                description=t_tier.description,
-                minimum_contribution_value=t_tier.minimum_contribution_value,
-                image_url=t_tier.image_url,
-                sort_order=t_tier.sort_order,
-                max_backers=t_tier.max_backers,
+                reward_type=trt.reward_type,
+                name=trt.name,
+                description=trt.description,
+                minimum_contribution_value=trt.minimum_contribution_value,
+                image_url=trt.image_url,
+                sort_order=trt.sort_order,
+                max_backers=trt.max_backers,
             )
-            tier_map[t_tier.id] = tier
-            created_reward_tier_ids.append(tier.id)
+            template_to_real_reward[trt.id] = rt
 
-        # 4. Create Needs + detail models from TemplateNeed
-        for t_need in template.template_needs.all():
+        # 6) Copy TemplateNeed -> Need + MoneyNeed/TimeNeed/ItemNeed
+        for tneed in template.template_needs.all():
+            # Base Need
             need = Need.objects.create(
                 fundraiser=fundraiser,
-                need_type=t_need.need_type,  # "money" / "time" / "item"
-                title=t_need.title,
-                description=t_need.description,
-                # status defaults to "open" per your model
-                priority=t_need.priority or "medium",
-                sort_order=t_need.sort_order,
+                need_type=tneed.need_type,
+                title=tneed.title,
+                description=tneed.description,
+                priority=tneed.priority,
+                sort_order=tneed.sort_order,
             )
 
-            # --- MoneyNeed ---
-            if t_need.need_type == "money":
+            # Money need
+            if tneed.need_type == "money":
                 MoneyNeed.objects.create(
                     need=need,
-                    target_amount=t_need.target_amount,
-                    comment=t_need.comment or "",
+                    target_amount=tneed.target_amount,
+                    comment=tneed.comment,
                 )
 
-            # --- TimeNeed ---
-            elif t_need.need_type == "time":
-                time_kwargs = {
-                    "need": need,
-                    "start_datetime": t_need.start_datetime,
-                    "end_datetime": t_need.end_datetime,
-                    "volunteers_needed": t_need.volunteers_needed or 0,
-                    "role_title": t_need.role_title or "",
-                    "location": t_need.location or "",
-                }
-                # Map template reward tier -> real RewardTier
-                if t_need.time_reward_template_id:
-                    time_kwargs["reward_tier"] = tier_map.get(
-                        t_need.time_reward_template_id
+            # Time need
+            elif tneed.need_type == "time":
+                # Guard against missing required fields for TimeNeed
+                if not tneed.start_datetime or not tneed.end_datetime:
+                    raise ValidationError({
+                        "detail": (
+                            f"Template time need '{tneed.title}' must have "
+                            f"start_datetime and end_datetime set before applying."
+                        )
+                    })
+
+                time_reward = None
+                if tneed.time_reward_template:
+                    time_reward = template_to_real_reward.get(
+                        tneed.time_reward_template.id
                     )
-                TimeNeed.objects.create(**time_kwargs)
 
-            # --- ItemNeed ---
-            elif t_need.need_type == "item":
-                item_kwargs = {
-                    "need": need,
-                    "item_name": t_need.item_name or "",
-                    "quantity_needed": t_need.quantity_needed or 1,
-                    "mode": t_need.mode or "either",
-                    "notes": t_need.notes or "",
-                }
-                if t_need.donation_reward_template_id:
-                    item_kwargs["donation_reward_tier"] = tier_map.get(
-                        t_need.donation_reward_template_id
+                TimeNeed.objects.create(
+                    need=need,
+                    start_datetime=tneed.start_datetime,
+                    end_datetime=tneed.end_datetime,
+                    volunteers_needed=tneed.volunteers_needed,
+                    role_title=tneed.role_title,
+                    location=tneed.location,
+                    reward_tier=time_reward,
+                )
+
+            # Item need
+            elif tneed.need_type == "item":
+                donation_reward = None
+                if tneed.donation_reward_template:
+                    donation_reward = template_to_real_reward.get(
+                        tneed.donation_reward_template.id
                     )
-                if t_need.loan_reward_template_id:
-                    item_kwargs["loan_reward_tier"] = tier_map.get(
-                        t_need.loan_reward_template_id
+
+                loan_reward = None
+                if tneed.loan_reward_template:
+                    loan_reward = template_to_real_reward.get(
+                        tneed.loan_reward_template.id
                     )
-                ItemNeed.objects.create(**item_kwargs)
 
-            created_need_ids.append(need.id)
+                ItemNeed.objects.create(
+                    need=need,
+                    item_name=tneed.item_name,
+                    quantity_needed=tneed.quantity_needed,
+                    mode=tneed.mode,
+                    notes=tneed.notes,
+                    donation_reward_tier=donation_reward,
+                    loan_reward_tier=loan_reward,
+                )
 
-        # 5. (Optional) remember which template was used (if you add a field)
-        # if hasattr(fundraiser, "template_name"):
-        #     fundraiser.template_name = template.name
-        #     fundraiser.save()
+        # 7) Return the full, updated fundraiser detail
+        detail_serializer = FundraiserDetailSerializer(fundraiser)
+        return Response(detail_serializer.data, status=status.HTTP_200_OK)
 
-        return Response(
-            {
-                "detail": "Template applied successfully.",
-                "fundraiser_id": fundraiser.id,
-                "template_id": template.id,
-                "created_need_ids": created_need_ids,
-                "created_reward_tier_ids": created_reward_tier_ids,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+    
+        
+# ====================================================================================
+# TEMPLATE REWARD TIERS
+# ====================================================================================
+
+class TemplateRewardTierListCreate(APIView):
+    """
+    GET: list all template reward tiers
+    POST: create a new template reward tier
+    """
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get(self, request):
+        tiers = TemplateRewardTier.objects.all()
+        serializer = TemplateRewardTierSerializer(tiers, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = TemplateRewardTierSerializer(data=request.data)
+        if serializer.is_valid():
+            tier = serializer.save()
+            return Response(
+                TemplateRewardTierSerializer(tier).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TemplateRewardTierDetail(APIView):
+    """
+    GET: retrieve a single template reward tier
+    PUT/PATCH: update it
+    DELETE: delete it
+    """
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_object(self, pk):
+        try:
+            return TemplateRewardTier.objects.get(pk=pk)
+        except TemplateRewardTier.DoesNotExist:
+            raise Http404
+
+    def get(self, request, pk):
+        tier = self.get_object(pk)
+        serializer = TemplateRewardTierSerializer(tier)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        tier = self.get_object(pk)
+        serializer = TemplateRewardTierSerializer(tier, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, pk):
+        tier = self.get_object(pk)
+        serializer = TemplateRewardTierSerializer(tier, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        tier = self.get_object(pk)
+        tier.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ====================================================================================
+# TEMPLATE NEEDS
+# ====================================================================================
+
+class TemplateNeedListCreate(APIView):
+    """
+    GET: list all template needs
+    POST: create a new template need
+    """
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get(self, request):
+        needs = TemplateNeed.objects.all()
+        serializer = TemplateNeedSerializer(needs, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = TemplateNeedSerializer(data=request.data)
+        if serializer.is_valid():
+            need = serializer.save()
+            return Response(
+                TemplateNeedSerializer(need).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TemplateNeedDetail(APIView):
+    """
+    GET: retrieve a single template need
+    PUT/PATCH: update it
+    DELETE: delete it
+    """
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_object(self, pk):
+        try:
+            return TemplateNeed.objects.get(pk=pk)
+        except TemplateNeed.DoesNotExist:
+            raise Http404
+
+    def get(self, request, pk):
+        need = self.get_object(pk)
+        serializer = TemplateNeedSerializer(need)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        need = self.get_object(pk)
+        serializer = TemplateNeedSerializer(need, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, pk):
+        need = self.get_object(pk)
+        serializer = TemplateNeedSerializer(need, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        need = self.get_object(pk)
+        need.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

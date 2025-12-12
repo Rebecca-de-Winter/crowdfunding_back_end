@@ -39,20 +39,49 @@ urlpatterns = [
     path("item-pledges/<int:pk>/", views.ItemPledgeDetail.as_view(), name="itempledge-detail"),
 
     # Fundraiser Templates
+
     path(
-        "fundraiser-templates/",
-        views.FundraiserTemplateList.as_view(),
-        name="fundraisertemplate-list",
+    "fundraiser-templates/",
+    views.FundraiserTemplateListCreate.as_view(),
+    name="fundraiser-template-list",
     ),
+
     path(
-        "fundraiser-templates/<int:pk>/",
-        views.FundraiserTemplateDetail.as_view(),
-        name="fundraisertemplate-detail",
+    "fundraiser-templates/<int:pk>/",
+    views.FundraiserTemplateDetail.as_view(),
+    name="fundraiser-template-detail",
     ),
+
     path(
-        "fundraisers/apply-template/",
-        views.ApplyTemplateToFundraiser.as_view(),
-        name="fundraiser-apply-template",
+    "fundraisers/apply-template/",
+    views.ApplyTemplateToFundraiser.as_view(),
+    name="apply-template-to-fundraiser",
+    ),
+
+    # Template Reward Tiers
+    path(
+    "template-reward-tiers/",
+    views.TemplateRewardTierListCreate.as_view(),
+    name="template-rewardtier-list",
+    ),
+
+    path(
+    "template-reward-tiers/<int:pk>/",
+    views.TemplateRewardTierDetail.as_view(),
+    name="template-rewardtier-detail",
+    ),
+
+    # Template Needs
+    path(
+    "template-needs/",
+    views.TemplateNeedListCreate.as_view(),
+    name="template-need-list",
+    ),
+
+    path(
+    "template-needs/<int:pk>/",
+    views.TemplateNeedDetail.as_view(),
+    name="template-need-detail",
     ),
 
     # REPORTING ENDPOINTS

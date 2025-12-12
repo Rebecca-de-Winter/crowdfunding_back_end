@@ -193,6 +193,83 @@ This is to avoid obvious duplication of rewards given.
 4. Attach your rewards to needs (unless already created when need was made)
 5. Start accepting pledges
 
+## Fundraiser Templates (Owner Tools)
+
+Fundraiser templates are a shortcut for organisers who regularly run similar events  
+(e.g. “Backyard BBQ”, “School Trivia Night”, “Charity Gig”).
+
+A template stores:
+
+- A “template fundraiser” (title, description, goal, dates, etc.)
+- A set of base Needs (money / time / item)
+- The detail Need records (MoneyNeed, TimeNeed, ItemNeed)
+- Any reward tiers attached to those needs
+
+You can then apply that template to a brand new fundraiser, and the backend will:
+
+- Clone all needs (base + detail) from the template
+- Clone all reward tiers
+- Wire the cloned needs + rewards to the **new** fundraiser
+- Leave pledges out of it (templates never carry pledges)
+
+This lets you spin up a fully pre-configured fundraiser in one request.
+
+### How templates are used (owner flow)
+
+#### 1. Create a template
+
+Define a reusable pattern that includes a base fundraiser, its needs, and reward tiers.
+
+#### 2. Create a new blank fundraiser
+
+Use `POST /fundraisers/` to create the live fundraiser you want to run  
+(e.g. “BBQ for School Music Program”).  
+At this point, it should **not** have any needs or reward tiers yet.
+
+#### 3. Apply the template to the new fundraiser
+
+Call:
+
+```http
+POST /fundraisers/<id>/apply-template/
+```
+
+Paste in your fundraiser_id and template_id as shown:
+
+![Apply Template](docs/applytemplate.png)
+
+This is where:
+
+- "id" is the new fundraiser you just created
+- "template_id" is the ID of the template you want to copy from
+
+#### 4. Edit and customise
+
+After applying the template, you can adjust:
+
+- Titles, dates, or goal
+
+- Targets on MoneyNeeds
+
+- Volunteer numbers or shift times
+
+- Item quantities, modes, or attached rewards
+
+All changes now affect only this new fundraiser, not the original template.
+
+#### Safety rules
+
+To avoid confusing or destructive behaviour, the backend enforces that you cannot apply a template to a fundraiser that already has:
+
+- existing needs, or
+
+- existing reward tiers
+
+If you try, the endpoint returns a **400 Bad Request** with an explanation,
+instead of silently duplicating or overwriting anything.
+
+This means it’s safe to call apply-template exactly once per new fundraiser.
+
 ## How to register a new user and create a new fundraiser
 
 ### 1. Register a new user
@@ -431,7 +508,7 @@ Reward behaviour depends on the type of pledge:
 
 All earned rewards appear through:
 
-#### GET /my-rewards/
+#### `GET /reports/fundraisers/<id>/my-rewards/`
 
 - Total money
 
@@ -601,29 +678,72 @@ Important:
 - Adding/changing reward tiers on the ItemNeed after pledges exist will only affect future ItemPledges (or existing ones if they are edited).
 - Reward stamping for item/time occurs here, at the moment the detailed pledge is created.
 
-#### Viewing Earned Rewards
+### 11. Viewing earned rewards & how the rewards summary works
 
-Supporters can view their totals and rewards using:
+Supporters can view their totals and rewards for a **single fundraiser** using:
 
-- GET /my-rewards/
+- `GET /reports/fundraisers/<id>/my-rewards/`
 
-This endpoint returns:
+This endpoint returns, for the logged-in supporter:
 
 - Total money pledged
-
 - Total time committed
-
 - Total items pledged
+- `earned_money_reward_tiers` (dynamic, threshold-based)
+- `earned_other_reward_tiers` (time + item rewards, based on stamped `Pledge.reward_tier`)
 
-- earned_money_reward_tiers (dynamic, threshold-based)
+Behind the scenes, the summary works in three parts:
 
-- earned_other_reward_tiers (time + item rewards, based on stamped reward_tier on pledges)
+#### 1. Money rewards (dynamic, threshold-based)
 
-Reward stamping for time and item therefore occurs in Step 2 (TimePledge / ItemPledge), not when the base Pledge is created.
+Money rewards are always recalculated based on the supporter’s total money pledged across all `MoneyPledge` objects for that fundraiser.
 
-#### Example:
+- Adding new money reward tiers → instantly reflected
+- Editing thresholds → instantly reflected
+- Editing or deleting past money pledges → instantly reflected
 
-![My-rewards](docs/my-rewards.png)
+This behaves like Kickstarter-style tiers:  
+If a supporter crosses a new tier threshold, they immediately gain that tier.
+
+#### 2. Time and item rewards (stamped at creation or update)
+
+Time and item rewards do **not** recalculate dynamically.
+
+They are applied using reward stamping:
+
+- When a `TimePledge` or `ItemPledge` is created
+- Or when it is updated via `PUT`
+
+At that moment, the backend:
+
+- Looks up the associated `TimeNeed` or `ItemNeed`
+- Reads the relevant reward tier (`time_reward_tier`, `donation_reward_tier`, or `loan_reward_tier`)
+- Writes it to `Pledge.reward_tier`
+
+Changing reward tiers on needs later will **not** automatically change older pledges.  
+To re-evaluate rewards, you’d need to update those pledges (e.g. via `PUT`).
+
+#### 3. Totals returned by the endpoint
+
+The summary endpoint calculates:
+
+- `total_money_pledged` – sum of all `MoneyPledge.amount` values
+- `total_time_hours_pledged` – sum of all `TimePledge.hours_committed`
+- `total_item_quantity_pledged` – sum of all `ItemPledge.quantity` values
+
+It also returns:
+
+- `earned_money_reward_tiers` (money tiers where the supporter’s total meets the minimum contribution)
+- `earned_other_reward_tiers` (distinct time/item reward tiers stamped on pledges)
+
+This lets supporters see both:
+
+- Their **tiered rewards** for money (Bronze / Silver / Gold etc.), and
+- Their **specific recognition** for volunteering or lending/donating gear.
+
+##### Example
+
+![Reward Summary](docs/rewardsummary.png)
 
 # API Specifications
 
@@ -822,6 +942,7 @@ Each is linked by a OneToOne relationship to a base Need.
 | URL                    | Method | Purpose              | Request Body                  | Success | Auth                          |
 | ---------------------- | ------ | -------------------- | ----------------------------- | ------- | ----------------------------- |
 | `/money-pledges/`      | POST   | Create MoneyPledge   | `pledge`, `amount`, `comment` | 201     | Supporter only                |
+| `/money-pledges/`      | GET    | List MoneyPledges    | –                             | 200     | Supporter or Fundraiser owner |
 | `/money-pledges/<id>/` | GET    | Retrieve MoneyPledge | –                             | 200     | Supporter or Fundraiser owner |
 | `/money-pledges/<id>/` | PUT    | Update MoneyPledge   | `amount`, `comment`           | 200     | Supporter only                |
 | `/money-pledges/<id>/` | DELETE | Delete MoneyPledge   | –                             | 204     | Supporter only                |
@@ -839,6 +960,7 @@ Each is linked by a OneToOne relationship to a base Need.
 | URL                   | Method | Purpose             | Request Body                                                                        | Success | Auth                          |
 | --------------------- | ------ | ------------------- | ----------------------------------------------------------------------------------- | ------- | ----------------------------- |
 | `/time-pledges/`      | POST   | Create TimePledge   | `pledge`, `start_datetime`, `end_datetime`, `hours_committed`, `comment (optional)` | 201     | Supporter only                |
+| `/time-pledges/`      | GET    | List TimePledges    | –                                                                                   | 200     | Supporter or Fundraiser owner |
 | `/time-pledges/<id>/` | GET    | Retrieve TimePledge | –                                                                                   | 200     | Supporter or Fundraiser owner |
 | `/time-pledges/<id>/` | PUT    | Update TimePledge   | Same as POST                                                                        | 200     | Supporter only                |
 | `/time-pledges/<id>/` | DELETE | Delete TimePledge   | –                                                                                   | 204     | Supporter only                |
@@ -856,6 +978,7 @@ Each is linked by a OneToOne relationship to a base Need.
 | URL                   | Method | Purpose             | Request Body                                                              | Success | Auth                          |
 | --------------------- | ------ | ------------------- | ------------------------------------------------------------------------- | ------- | ----------------------------- |
 | `/item-pledges/`      | POST   | Create ItemPledge   | `pledge`, `quantity`, `mode ("donation" or "loan")`, `comment (optional)` | 201     | Supporter only                |
+| `/item-pledges/`      | GET    | List MoneyPledges   | –                                                                         | 200     | Supporter or Fundraiser owner |
 | `/item-pledges/<id>/` | GET    | Retrieve ItemPledge | –                                                                         | 200     | Supporter or Fundraiser owner |
 | `/item-pledges/<id>/` | PUT    | Update ItemPledge   | Same fields as POST                                                       | 200     | Supporter only                |
 | `/item-pledges/<id>/` | DELETE | Delete ItemPledge   | –                                                                         | 204     | Supporter only                |
@@ -889,6 +1012,19 @@ They can also be attached to pledges (for money, time, or item pledges) so suppo
 
 ![POST Reward Tiers](docs/image-27.png)
 
+## Fundraiser Templates
+
+Fundraiser templates let organisers define reusable starter configurations and then apply them to new fundraisers.
+
+| URL                                 | Method | Purpose                                   | Request Body                         | Success | Auth             |
+| ----------------------------------- | ------ | ----------------------------------------- | ------------------------------------ | ------- | ---------------- |
+| `/fundraiser-templates/`            | GET    | List all fundraiser templates             | –                                    | 200     | Logged-in        |
+| `/fundraiser-templates/`            | POST   | Create a new fundraiser template          | Template fields (as for fundraisers) | 201     | Logged-in        |
+| `/fundraiser-templates/<id>/`       | GET    | Retrieve a single template                | –                                    | 200     | Logged-in        |
+| `/fundraiser-templates/<id>/`       | PUT    | Update a template                         | Same fields as POST                  | 200     | Template owner   |
+| `/fundraiser-templates/<id>/`       | DELETE | Delete a template                         | –                                    | 204     | Template owner   |
+| `/fundraisers/<id>/apply-template/` | POST   | Apply a template to a specific fundraiser | `{ "template_id": <template_id> }`   | 200     | Fundraiser owner |
+
 ## Reporting Endpoints
 
 ### Fundraiser Summary
@@ -921,7 +1057,7 @@ They can also be attached to pledges (for money, time, or item pledges) so suppo
 | ---------------------- | ------ | ----------------------------------------- | ------------ | ------- | --------- |
 | `/reports/my-pledges/` | GET    | Returns all pledges made by the supporter | –            | 200     | Logged-in |
 
-### My Rewards (Per Fundraiser)
+### My Rewards Summary
 
 Returns reward information for the logged-in supporter for a specific fundraiser only, including:
 
