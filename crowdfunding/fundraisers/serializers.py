@@ -11,6 +11,9 @@ from .models import ( # Importing directly from models.py means you can just rea
     TimeNeed,
     ItemNeed,
     RewardTier,
+    FundraiserTemplate,
+    TemplateNeed,
+    TemplateRewardTier,
 )
 
 # ====================================================================================
@@ -378,10 +381,6 @@ class ItemPledgeSerializer(serializers.ModelSerializer):
             )
         return value
 
-
-
-
-
 # ====================================================================================
 # PLEDGE BASE + DETAIL SERIALIZERS
 # ====================================================================================
@@ -556,3 +555,73 @@ class FundraiserDetailSerializer(FundraiserSerializer):
     pledges = PledgeSerializer(many=True, read_only=True)
     needs = NeedSerializer(many=True, read_only=True)
     reward_tiers = RewardTierSerializer(many=True, read_only=True)
+
+# ====================================================================================
+# TEMPLATE SERIALIZERS
+# ====================================================================================
+
+class TemplateRewardTierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TemplateRewardTier
+        fields = [
+            "id",
+            "reward_type",
+            "name",
+            "description",
+            "minimum_contribution_value",
+            "image_url",
+            "sort_order",
+            "max_backers",
+        ]
+
+
+class TemplateNeedSerializer(serializers.ModelSerializer):
+    time_reward_template = TemplateRewardTierSerializer(read_only=True)
+    donation_reward_template = TemplateRewardTierSerializer(read_only=True)
+    loan_reward_template = TemplateRewardTierSerializer(read_only=True)
+
+    class Meta:
+        model = TemplateNeed
+        fields = [
+            "id",
+            "need_type",
+            "title",
+            "description",
+            "priority",
+            "sort_order",
+            # money-like
+            "target_amount",
+            "comment",
+            # time-like
+            "start_datetime",
+            "end_datetime",
+            "volunteers_needed",
+            "role_title",
+            "location",
+            "time_reward_template",
+            # item-like
+            "item_name",
+            "quantity_needed",
+            "mode",
+            "notes",
+            "donation_reward_template",
+            "loan_reward_template",
+        ]
+
+
+class FundraiserTemplateSerializer(serializers.ModelSerializer):
+    template_needs = TemplateNeedSerializer(many=True, read_only=True)
+    template_reward_tiers = TemplateRewardTierSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = FundraiserTemplate
+        fields = [
+            "id",
+            "name",
+            "description",
+            "image_url",
+            "category",
+            "is_active",
+            "template_needs",
+            "template_reward_tiers",
+        ]

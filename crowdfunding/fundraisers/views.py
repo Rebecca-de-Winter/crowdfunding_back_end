@@ -18,6 +18,9 @@ from .models import (
     MoneyPledge,
     TimePledge,
     ItemPledge,
+    FundraiserTemplate,
+    TemplateNeed,
+    TemplateRewardTier,
 )
 from .serializers import (
     FundraiserSerializer,
@@ -33,6 +36,7 @@ from .serializers import (
     MoneyPledgeSerializer,
     TimePledgeSerializer,
     ItemPledgeSerializer,
+    FundraiserTemplateSerializer,
 )
 from .permissions import IsOwnerOrReadOnly, IsSupporterOrReadOnly
 
@@ -1596,3 +1600,177 @@ class MyPledgesReport(APIView):
         }
         return Response(data)
 
+###################################################################################
+
+class FundraiserTemplateList(APIView):
+    """
+    List all active fundraiser templates.
+    For now, read-only. Templates are managed in the Django admin.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        qs = FundraiserTemplate.objects.filter(is_active=True)
+        serializer = FundraiserTemplateSerializer(qs, many=True)
+        return Response(serializer.data)
+
+
+class FundraiserTemplateDetail(APIView):
+    """
+    Retrieve a single fundraiser template with its needs + reward tiers.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get_object(self, pk):
+        try:
+            return FundraiserTemplate.objects.get(pk=pk, is_active=True)
+        except FundraiserTemplate.DoesNotExist:
+            raise Http404
+
+    def get(self, request, pk):
+        template = self.get_object(pk)
+        serializer = FundraiserTemplateSerializer(template)
+        return Response(serializer.data)
+
+class ApplyTemplateToFundraiser(APIView):
+    """
+    Apply a template to an existing fundraiser.
+
+    - Only the fundraiser owner can do this.
+    - Creates:
+      - RewardTiers from TemplateRewardTier
+      - Needs from TemplateNeed
+      - MoneyNeed / TimeNeed / ItemNeed with the correct fields
+      - Wires TimeNeed / ItemNeed to the newly created RewardTiers.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        fundraiser_id = request.data.get("fundraiser_id")
+        template_id = request.data.get("template_id")
+
+        if not fundraiser_id or not template_id:
+            return Response(
+                {"detail": "fundraiser_id and template_id are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 1. Get fundraiser + ownership check
+        try:
+            fundraiser = Fundraiser.objects.get(pk=fundraiser_id)
+        except Fundraiser.DoesNotExist:
+            return Response(
+                {"detail": "Fundraiser not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if fundraiser.owner != request.user:
+            return Response(
+                {"detail": "You can only apply templates to your own fundraisers."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 2. Get template
+        try:
+            template = FundraiserTemplate.objects.get(pk=template_id, is_active=True)
+        except FundraiserTemplate.DoesNotExist:
+            return Response(
+                {"detail": "Template not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        created_need_ids = []
+        created_reward_tier_ids = []
+
+        # 3. First create RewardTiers from TemplateRewardTier
+        tier_map = {}  # template_tier_id -> real RewardTier
+        for t_tier in template.template_reward_tiers.all():
+            tier = RewardTier.objects.create(
+                fundraiser=fundraiser,
+                reward_type=t_tier.reward_type,
+                name=t_tier.name,
+                description=t_tier.description,
+                minimum_contribution_value=t_tier.minimum_contribution_value,
+                image_url=t_tier.image_url,
+                sort_order=t_tier.sort_order,
+                max_backers=t_tier.max_backers,
+            )
+            tier_map[t_tier.id] = tier
+            created_reward_tier_ids.append(tier.id)
+
+        # 4. Create Needs + detail models from TemplateNeed
+        for t_need in template.template_needs.all():
+            need = Need.objects.create(
+                fundraiser=fundraiser,
+                need_type=t_need.need_type,  # "money" / "time" / "item"
+                title=t_need.title,
+                description=t_need.description,
+                # status defaults to "open" per your model
+                priority=t_need.priority or "medium",
+                sort_order=t_need.sort_order,
+            )
+
+            # --- MoneyNeed ---
+            if t_need.need_type == "money":
+                MoneyNeed.objects.create(
+                    need=need,
+                    target_amount=t_need.target_amount,
+                    comment=t_need.comment or "",
+                )
+
+            # --- TimeNeed ---
+            elif t_need.need_type == "time":
+                time_kwargs = {
+                    "need": need,
+                    "start_datetime": t_need.start_datetime,
+                    "end_datetime": t_need.end_datetime,
+                    "volunteers_needed": t_need.volunteers_needed or 0,
+                    "role_title": t_need.role_title or "",
+                    "location": t_need.location or "",
+                }
+                # Map template reward tier -> real RewardTier
+                if t_need.time_reward_template_id:
+                    time_kwargs["reward_tier"] = tier_map.get(
+                        t_need.time_reward_template_id
+                    )
+                TimeNeed.objects.create(**time_kwargs)
+
+            # --- ItemNeed ---
+            elif t_need.need_type == "item":
+                item_kwargs = {
+                    "need": need,
+                    "item_name": t_need.item_name or "",
+                    "quantity_needed": t_need.quantity_needed or 1,
+                    "mode": t_need.mode or "either",
+                    "notes": t_need.notes or "",
+                }
+                if t_need.donation_reward_template_id:
+                    item_kwargs["donation_reward_tier"] = tier_map.get(
+                        t_need.donation_reward_template_id
+                    )
+                if t_need.loan_reward_template_id:
+                    item_kwargs["loan_reward_tier"] = tier_map.get(
+                        t_need.loan_reward_template_id
+                    )
+                ItemNeed.objects.create(**item_kwargs)
+
+            created_need_ids.append(need.id)
+
+        # 5. (Optional) remember which template was used (if you add a field)
+        # if hasattr(fundraiser, "template_name"):
+        #     fundraiser.template_name = template.name
+        #     fundraiser.save()
+
+        return Response(
+            {
+                "detail": "Template applied successfully.",
+                "fundraiser_id": fundraiser.id,
+                "template_id": template.id,
+                "created_need_ids": created_need_ids,
+                "created_reward_tier_ids": created_reward_tier_ids,
+            },
+            status=status.HTTP_201_CREATED,
+        )

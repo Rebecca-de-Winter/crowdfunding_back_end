@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 # Create your models here.
 
@@ -303,3 +304,179 @@ class RewardTier(models.Model):
     def __str__(self):
         return f"{self.name} ({self.fundraiser.title})" # Returns a string like "VIP Pass (FundraiserName)"
 
+############################################################################################################
+
+class FundraiserTemplate(models.Model):
+    """
+    A reusable blueprint for setting up a fundraiser.
+    Can include default needs and reward tiers.
+    """
+
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    image_url = models.URLField(blank=True)
+
+    # Optional: for future user-created templates
+    owner = models.ForeignKey(
+        get_user_model(),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="fundraiser_templates",
+    )
+
+    is_active = models.BooleanField(default=True)
+    category = models.CharField(max_length=100, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class TemplateRewardTier(models.Model):
+    """
+    Blueprint for RewardTier. When applied, becomes a real RewardTier
+    attached to a specific fundraiser.
+    """
+
+    template = models.ForeignKey(
+        FundraiserTemplate,
+        related_name="template_reward_tiers",
+        on_delete=models.CASCADE,
+    )
+
+    reward_type = models.CharField(
+        max_length=10,
+        choices=RewardTier.REWARD_TYPE_CHOICES,
+        default="money",
+        help_text="What kind of pledge this reward is for.",
+    )
+
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+
+    minimum_contribution_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Minimum cash amount for this reward (used for money pledges).",
+    )
+
+    image_url = models.URLField(blank=True)
+    sort_order = models.IntegerField(default=0)
+    max_backers = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.name} (template: {self.template.name})"
+
+
+class TemplateNeed(models.Model):
+    """
+    Blueprint for a Need + its detail model (MoneyNeed / TimeNeed / ItemNeed).
+
+    When applied, this becomes:
+      - a real Need
+      - plus MoneyNeed / TimeNeed / ItemNeed
+      - wired up to RewardTiers created from TemplateRewardTier.
+    """
+
+    NEED_TYPE_CHOICES = Need.TYPE_CHOICES  # ("money"/"time"/"item")
+    PRIORITY_CHOICES = Need.PRIORITY_CHOICES  # ("high"/"medium"/"low")
+    MODE_CHOICES = ItemNeed.MODE_CHOICES     # ("donation"/"loan"/"either")
+
+    template = models.ForeignKey(
+        FundraiserTemplate,
+        related_name="template_needs",
+        on_delete=models.CASCADE,
+    )
+
+    need_type = models.CharField(max_length=20, choices=NEED_TYPE_CHOICES)
+
+    # Base Need fields
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default="medium",
+    )
+    sort_order = models.IntegerField(default=0)
+
+    # --- MoneyNeed-like fields ---
+    target_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="For money needs: target amount.",
+    )
+    comment = models.TextField(
+        blank=True,
+        help_text="Optional default comment for money needs.",
+    )
+
+    # --- TimeNeed-like fields ---
+    start_datetime = models.DateTimeField(null=True, blank=True)
+    end_datetime = models.DateTimeField(null=True, blank=True)
+    volunteers_needed = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of volunteers required.",
+    )
+    role_title = models.CharField(max_length=200, blank=True)
+    location = models.CharField(max_length=200, blank=True)
+
+    time_reward_template = models.ForeignKey(
+        "TemplateRewardTier",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="time_template_needs",
+        help_text="Which template reward tier to use for this time need.",
+    )
+
+    # --- ItemNeed-like fields ---
+    item_name = models.CharField(max_length=200, blank=True)
+    quantity_needed = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="For item needs: quantity required.",
+    )
+    mode = models.CharField(
+        max_length=20,
+        choices=MODE_CHOICES,
+        blank=True,
+        help_text="Donation / Loan / Either (copied to ItemNeed).",
+    )
+    notes = models.TextField(blank=True)
+
+    donation_reward_template = models.ForeignKey(
+        "TemplateRewardTier",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="donation_item_template_needs",
+        help_text="Template reward tier for item donations.",
+    )
+    loan_reward_template = models.ForeignKey(
+        "TemplateRewardTier",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="loan_item_template_needs",
+        help_text="Template reward tier for item loans.",
+    )
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.title} ({self.need_type}) in {self.template.name}"

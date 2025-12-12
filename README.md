@@ -761,13 +761,13 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ## Time Need
 
-| URL                 | Method | Purpose             | Request Body                                                                                           | Success | Auth             |
-| ------------------- | ------ | ------------------- | ------------------------------------------------------------------------------------------------------ | ------- | ---------------- |
-| `/time-needs/`      | GET    | List all time needs | –                                                                                                      | 200     | None             |
-| `/time-needs/`      | POST   | Create TimeNeed     | `need`, `role_title`, `location`, `start_datetime`, `end_datetime`, `volunteers_needed`, `reward_tier` | 201     | Fundraiser owner |
-| `/time-needs/<id>/` | GET    | Retrieve TimeNeed   | –                                                                                                      | 200     | None             |
-| `/time-needs/<id>/` | PUT    | Update TimeNeed     | Same as POST                                                                                           | 200     | Fundraiser owner |
-| `/time-needs/<id>/` | DELETE | Delete TimeNeed     | –                                                                                                      | 204     | Fundraiser owner |
+| URL                 | Method | Purpose             | Request Body                                                                                                      | Success | Auth             |
+| ------------------- | ------ | ------------------- | ----------------------------------------------------------------------------------------------------------------- | ------- | ---------------- |
+| `/time-needs/`      | GET    | List all time needs | –                                                                                                                 | 200     | None             |
+| `/time-needs/`      | POST   | Create TimeNeed     | `need`, `role_title`, `location`, `start_datetime`, `end_datetime`, `volunteers_needed`, `reward_tier (optional)` | 201     | Fundraiser owner |
+| `/time-needs/<id>/` | GET    | Retrieve TimeNeed   | –                                                                                                                 | 200     | None             |
+| `/time-needs/<id>/` | PUT    | Update TimeNeed     | Same as POST                                                                                                      | 200     | Fundraiser owner |
+| `/time-needs/<id>/` | DELETE | Delete TimeNeed     | –                                                                                                                 | 204     | Fundraiser owner |
 
 ### Example: GET Time Needs (GET/time-needs)
 
@@ -779,13 +779,13 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Item Need
 
-| URL                 | Method | Purpose             | Request Body                                   | Success | Auth             |
-| ------------------- | ------ | ------------------- | ---------------------------------------------- | ------- | ---------------- |
-| `/item-needs/`      | GET    | List all item needs | –                                              | 200     | None             |
-| `/item-needs/`      | POST   | Create ItemNeed     | `need`, `item_name`, `quantity_needed`, `mode` | 201     | Fundraiser owner |
-| `/item-needs/<id>/` | GET    | Retrieve ItemNeed   | –                                              | 200     | None             |
-| `/item-needs/<id>/` | PUT    | Update ItemNeed     | Same as POST                                   | 200     | Fundraiser owner |
-| `/item-needs/<id>/` | DELETE | Delete ItemNeed     | –                                              | 204     | Fundraiser owner |
+| URL                 | Method | Purpose             | Request Body                                                                                                                                                                      | Success | Auth             |
+| ------------------- | ------ | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------------- |
+| `/item-needs/`      | GET    | List all item needs | –                                                                                                                                                                                 | 200     | None             |
+| `/item-needs/`      | POST   | Create ItemNeed     | `need`, `item_name`, `quantity_needed`, `mode (choices - "donation", "loan" and "either")`, `notes (optional)`, `donation_reward_tier (optional)`, `loan_reward_tier (optional) ` | 201     | Fundraiser owner |
+| `/item-needs/<id>/` | GET    | Retrieve ItemNeed   | –                                                                                                                                                                                 | 200     | None             |
+| `/item-needs/<id>/` | PUT    | Update ItemNeed     | Same as POST                                                                                                                                                                      | 200     | Fundraiser owner |
+| `/item-needs/<id>/` | DELETE | Delete ItemNeed     | –                                                                                                                                                                                 | 204     | Fundraiser owner |
 
 ### Example: Get Item Needs (GET/item-needs)
 
@@ -799,13 +799,13 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Base Pledge
 
-| URL              | Method | Purpose           | Request Body                                 | Success | Auth                                      |
-| ---------------- | ------ | ----------------- | -------------------------------------------- | ------- | ----------------------------------------- |
-| `/pledges/`      | GET    | List all pledges  | –                                            | 200     | Logged-in or Public (depending on config) |
-| `/pledges/`      | POST   | Create a pledge   | `fundraiser`, `need`, `comment`, `anonymous` | 201     | Logged-in                                 |
-| `/pledges/<id>/` | GET    | Retrieve a pledge | –                                            | 200     | Supporter or Fundraiser owner             |
-| `/pledges/<id>/` | PUT    | Update pledge     | `comment`, `anonymous`, `status`             | 200     | Supporter only                            |
-| `/pledges/<id>/` | DELETE | Delete pledge     | –                                            | 204     | Supporter (only if `status = pending`)    |
+| URL              | Method | Purpose           | Request Body                                                           | Success | Auth                                      |
+| ---------------- | ------ | ----------------- | ---------------------------------------------------------------------- | ------- | ----------------------------------------- |
+| `/pledges/`      | GET    | List all pledges  | –                                                                      | 200     | Logged-in or Public (depending on config) |
+| `/pledges/`      | POST   | Create a pledge   | `fundraiser`, `need`, `comment`, `anonymous`, `reward_tier (optional)` | 201     | Logged-in                                 |
+| `/pledges/<id>/` | GET    | Retrieve a pledge | –                                                                      | 200     | Supporter or Fundraiser owner             |
+| `/pledges/<id>/` | PUT    | Update pledge     | `comment`, `anonymous`, `status`, `reward_tier`                        | 200     | Supporter only                            |
+| `/pledges/<id>/` | DELETE | Delete pledge     | –                                                                      | 204     | Supporter (only if `status = pending`)    |
 
 ### Example: Get Pledge (GET/pledges)
 
@@ -836,12 +836,12 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Time Pledge
 
-| URL                   | Method | Purpose             | Request Body                                                  | Success | Auth                          |
-| --------------------- | ------ | ------------------- | ------------------------------------------------------------- | ------- | ----------------------------- |
-| `/time-pledges/`      | POST   | Create TimePledge   | `pledge`, `start_datetime`, `end_datetime`, `hours_committed` | 201     | Supporter only                |
-| `/time-pledges/<id>/` | GET    | Retrieve TimePledge | –                                                             | 200     | Supporter or Fundraiser owner |
-| `/time-pledges/<id>/` | PUT    | Update TimePledge   | Same as POST                                                  | 200     | Supporter only                |
-| `/time-pledges/<id>/` | DELETE | Delete TimePledge   | –                                                             | 204     | Supporter only                |
+| URL                   | Method | Purpose             | Request Body                                                                        | Success | Auth                          |
+| --------------------- | ------ | ------------------- | ----------------------------------------------------------------------------------- | ------- | ----------------------------- |
+| `/time-pledges/`      | POST   | Create TimePledge   | `pledge`, `start_datetime`, `end_datetime`, `hours_committed`, `comment (optional)` | 201     | Supporter only                |
+| `/time-pledges/<id>/` | GET    | Retrieve TimePledge | –                                                                                   | 200     | Supporter or Fundraiser owner |
+| `/time-pledges/<id>/` | PUT    | Update TimePledge   | Same as POST                                                                        | 200     | Supporter only                |
+| `/time-pledges/<id>/` | DELETE | Delete TimePledge   | –                                                                                   | 204     | Supporter only                |
 
 ### Example: Get Time Pledge (GET/time-pledges)
 
@@ -853,12 +853,12 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Item Pledge
 
-| URL                   | Method | Purpose             | Request Body                 | Success | Auth                          |
-| --------------------- | ------ | ------------------- | ---------------------------- | ------- | ----------------------------- |
-| `/item-pledges/`      | POST   | Create ItemPledge   | `pledge`, `quantity`, `mode` | 201     | Supporter only                |
-| `/item-pledges/<id>/` | GET    | Retrieve ItemPledge | –                            | 200     | Supporter or Fundraiser owner |
-| `/item-pledges/<id>/` | PUT    | Update ItemPledge   | Same fields as POST          | 200     | Supporter only                |
-| `/item-pledges/<id>/` | DELETE | Delete ItemPledge   | –                            | 204     | Supporter only                |
+| URL                   | Method | Purpose             | Request Body                                                              | Success | Auth                          |
+| --------------------- | ------ | ------------------- | ------------------------------------------------------------------------- | ------- | ----------------------------- |
+| `/item-pledges/`      | POST   | Create ItemPledge   | `pledge`, `quantity`, `mode ("donation" or "loan")`, `comment (optional)` | 201     | Supporter only                |
+| `/item-pledges/<id>/` | GET    | Retrieve ItemPledge | –                                                                         | 200     | Supporter or Fundraiser owner |
+| `/item-pledges/<id>/` | PUT    | Update ItemPledge   | Same fields as POST                                                       | 200     | Supporter only                |
+| `/item-pledges/<id>/` | DELETE | Delete ItemPledge   | –                                                                         | 204     | Supporter only                |
 
 ### Example: Get Item Pledge (GET/item-pledges)
 
@@ -870,15 +870,16 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Reward Tiers
 
-Reward tiers can be optionally linked to MoneyNeed, TimeNeed or ItemNeed and allow supporters to receive bonuses when pledging.
+Reward tiers belong to a fundraiser and can be linked to TimeNeed and ItemNeed (separate tiers for donation vs loan).
+They can also be attached to pledges (for money, time, or item pledges) so supporters receive bonuses when pledging.
 
-| URL                   | Method | Purpose             | Request Body                        | Success | Auth             |
-| --------------------- | ------ | ------------------- | ----------------------------------- | ------- | ---------------- |
-| `/reward-tiers/`      | GET    | List reward tiers   | –                                   | 200     | None             |
-| `/reward-tiers/`      | POST   | Create RewardTier   | `fundraiser`, `name`, `description` | 201     | Fundraiser owner |
-| `/reward-tiers/<id>/` | GET    | Retrieve RewardTier | –                                   | 200     | None             |
-| `/reward-tiers/<id>/` | PUT    | Update RewardTier   | Same as POST                        | 200     | Fundraiser owner |
-| `/reward-tiers/<id>/` | DELETE | Delete RewardTier   | –                                   | 204     | Fundraiser owner |
+| URL                   | Method | Purpose             | Request Body                                                                                                                                                                              | Success | Auth             |
+| --------------------- | ------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------------- |
+| `/reward-tiers/`      | GET    | List reward tiers   | –                                                                                                                                                                                         | 200     | None             |
+| `/reward-tiers/`      | POST   | Create RewardTier   | `fundraiser`, `name`, `description`, `reward_type ("money", "time", "item", default "money")`, `minimum_contribution_value (for money rewards)`, `image_url`, `sort_order`, `max_backers` | 201     | Fundraiser owner |
+| `/reward-tiers/<id>/` | GET    | Retrieve RewardTier | –                                                                                                                                                                                         | 200     | None             |
+| `/reward-tiers/<id>/` | PUT    | Update RewardTier   | Same as POST                                                                                                                                                                              | 200     | Fundraiser owner |
+| `/reward-tiers/<id>/` | DELETE | Delete RewardTier   | –                                                                                                                                                                                         | 204     | Fundraiser owner |
 
 ### Example: Get Reward Tier (GET/reward-tiers/)
 
@@ -907,6 +908,38 @@ Reward tiers can be optionally linked to MoneyNeed, TimeNeed or ItemNeed and all
 | URL                        | Method | Purpose                                   | Request Body | Success | Auth      |
 | -------------------------- | ------ | ----------------------------------------- | ------------ | ------- | --------- |
 | `/reports/my-fundraisers/` | GET    | Lists summaries for all fundraisers I own | –            | 200     | Logged-in |
+
+### Fundraiser Pledges Report
+
+| URL                                  | Method | Purpose                                | Request Body | Success | Auth |
+| ------------------------------------ | ------ | -------------------------------------- | ------------ | ------- | ---- |
+| `/reports/fundraisers/<id>/pledges/` | GET    | Returns all pledges for the fundraiser | –            | 200     | None |
+
+### My Pledges
+
+| URL                    | Method | Purpose                                   | Request Body | Success | Auth      |
+| ---------------------- | ------ | ----------------------------------------- | ------------ | ------- | --------- |
+| `/reports/my-pledges/` | GET    | Returns all pledges made by the supporter | –            | 200     | Logged-in |
+
+### My Rewards (Per Fundraiser)
+
+Returns reward information for the logged-in supporter for a specific fundraiser only, including:
+
+- total money pledged
+
+- total hours pledged
+
+- total items pledged
+
+- earned money reward tiers (dynamic and threshold-based)
+
+- earned time/item reward tiers (based on reward stamping on pledges)
+
+This endpoint mirrors what a supporter would see in a personal “Rewards Dashboard” for that fundraiser.
+
+| URL                                     | Method | Purpose                                                           | Request Body | Success | Auth      |
+| --------------------------------------- | ------ | ----------------------------------------------------------------- | ------------ | ------- | --------- |
+| `/reports/fundraisers/<id>/my-rewards/` | GET    | Returns totals + earned reward tiers **for that fundraiser only** | –            | 200     | Logged-in |
 
 ### DB Schema
 

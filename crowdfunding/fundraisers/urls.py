@@ -38,6 +38,23 @@ urlpatterns = [
     path("item-pledges/", views.ItemPledgeList.as_view(), name="itempledge-list"),
     path("item-pledges/<int:pk>/", views.ItemPledgeDetail.as_view(), name="itempledge-detail"),
 
+    # Fundraiser Templates
+    path(
+        "fundraiser-templates/",
+        views.FundraiserTemplateList.as_view(),
+        name="fundraisertemplate-list",
+    ),
+    path(
+        "fundraiser-templates/<int:pk>/",
+        views.FundraiserTemplateDetail.as_view(),
+        name="fundraisertemplate-detail",
+    ),
+    path(
+        "fundraisers/apply-template/",
+        views.ApplyTemplateToFundraiser.as_view(),
+        name="fundraiser-apply-template",
+    ),
+
     # REPORTING ENDPOINTS
     path(
         "reports/fundraisers/<int:pk>/summary/",
