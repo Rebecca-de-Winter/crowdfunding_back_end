@@ -565,6 +565,7 @@ class TemplateRewardTierSerializer(serializers.ModelSerializer):
         model = TemplateRewardTier
         fields = [
             "id",
+            "template",
             "reward_type",
             "name",
             "description",
@@ -576,14 +577,54 @@ class TemplateRewardTierSerializer(serializers.ModelSerializer):
 
 
 class TemplateNeedSerializer(serializers.ModelSerializer):
+    """
+    Serializer for template needs.
+
+    Uses the same field names as:
+    - Need (need_type, title, description, priority, sort_order)
+    - MoneyNeed (target_amount, comment)
+    - TimeNeed (start_datetime, end_datetime, volunteers_needed, role_title, location)
+    - ItemNeed (item_name, quantity_needed, mode, notes)
+    plus FKs to TemplateRewardTier for time/item rewards.
+
+    Insomnia-friendly:
+    - You can SET reward links via *_id fields (write-only).
+    - You can SEE full reward objects via the nested fields.
+    """
+
+    # Nested read-only views (what you see on GET)
     time_reward_template = TemplateRewardTierSerializer(read_only=True)
     donation_reward_template = TemplateRewardTierSerializer(read_only=True)
     loan_reward_template = TemplateRewardTierSerializer(read_only=True)
+
+    # Write-only ID fields (what you POST/PUT in Insomnia)
+    time_reward_template_id = serializers.PrimaryKeyRelatedField(
+        queryset=TemplateRewardTier.objects.all(),
+        source="time_reward_template",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    donation_reward_template_id = serializers.PrimaryKeyRelatedField(
+        queryset=TemplateRewardTier.objects.all(),
+        source="donation_reward_template",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    loan_reward_template_id = serializers.PrimaryKeyRelatedField(
+        queryset=TemplateRewardTier.objects.all(),
+        source="loan_reward_template",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = TemplateNeed
         fields = [
             "id",
+            "template",
             "need_type",
             "title",
             "description",
@@ -599,13 +640,16 @@ class TemplateNeedSerializer(serializers.ModelSerializer):
             "role_title",
             "location",
             "time_reward_template",
+            "time_reward_template_id",
             # item-like
             "item_name",
             "quantity_needed",
             "mode",
             "notes",
             "donation_reward_template",
+            "donation_reward_template_id",
             "loan_reward_template",
+            "loan_reward_template_id",
         ]
 
 
@@ -617,9 +661,13 @@ class FundraiserTemplateSerializer(serializers.ModelSerializer):
         model = FundraiserTemplate
         fields = [
             "id",
-            "name",
+            "name",            # template label
+            "title",           # suggested fundraiser title
             "description",
+            "goal",
             "image_url",
+            "location",
+            "enable_rewards",
             "category",
             "is_active",
             "template_needs",

@@ -309,14 +309,39 @@ class RewardTier(models.Model):
 class FundraiserTemplate(models.Model):
     """
     A reusable blueprint for setting up a fundraiser.
-    Can include default needs and reward tiers.
+    Think of this as an example fundraiser + example needs + example rewards.
     """
 
+    # Label for the template itself (e.g. "Joanie's BBQ Banquet", "Rock Concert")
     name = models.CharField(max_length=100)
-    description = models.TextField(blank=True)
-    image_url = models.URLField(blank=True)
 
-    # Optional: for future user-created templates
+    # These mirror real Fundraiser fields so the template looks like a real one
+    title = models.CharField(
+        max_length=200,
+        help_text="Suggested fundraiser title when using this template.",
+    )
+    description = models.TextField(blank=True)
+    goal = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Suggested goal amount for this template.",
+    )
+    image_url = models.URLField(blank=True)
+    location = models.TextField(
+        blank=True,
+        help_text="Suggested location text (e.g. 'The Burrow, West End').",
+    )
+    enable_rewards = models.BooleanField(
+        default=True,
+        help_text="Should this template assume rewards are switched on?",
+    )
+
+    # Optional: category tags for browsing templates (e.g. 'music', 'bbq', 'party')
+    category = models.CharField(max_length=100, blank=True)
+
+    # For future: user-created templates
     owner = models.ForeignKey(
         get_user_model(),
         null=True,
@@ -326,8 +351,6 @@ class FundraiserTemplate(models.Model):
     )
 
     is_active = models.BooleanField(default=True)
-    category = models.CharField(max_length=100, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
