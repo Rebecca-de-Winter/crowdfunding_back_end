@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import ( # Importing directly from models.py means you can just read the class names and improt across. 
+from .utils import update_reward_tiers_for_supporter_and_fundraiser # Having a utility page allows you to write functions that updates rewards!!!
+from .models import ( # Importing directly from models.py means you can just read the class names and import across. 
     Fundraiser,
     Pledge,
     MoneyPledge,
@@ -26,7 +27,17 @@ class RewardTierSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = RewardTier
-        fields = "__all__"
+        fields =  [
+            "id",
+            "fundraiser",
+            "reward_type",
+            "name",
+            "description",
+            "minimum_contribution_value",
+            "image_url",
+            "sort_order",
+            "max_backers",
+        ]
 
 
 # ====================================================================================
@@ -150,9 +161,32 @@ class MoneyPledgeSerializer(serializers.ModelSerializer):
     Extra details for a money pledge.
     One-to-one with Pledge via Pledge.money_detail.
     """
+
+    supporter_total_for_fundraiser = serializers.SerializerMethodField()
+
     class Meta:
         model = MoneyPledge
         fields = "__all__"
+
+    def _update_rewards(self, money_pledge):
+        """
+        After creating/updating a money pledge, recalc the MONEY reward tier
+        for this supporter+fundraiser.
+        """
+        pledge = money_pledge.pledge
+        supporter = pledge.supporter
+        fundraiser = pledge.fundraiser
+        update_reward_tiers_for_supporter_and_fundraiser(supporter, fundraiser)
+
+    def create(self, validated_data):
+        money_pledge = super().create(validated_data)
+        self._update_rewards(money_pledge)
+        return money_pledge
+
+    def update(self, instance, validated_data):
+        money_pledge = super().update(instance, validated_data)
+        self._update_rewards(money_pledge)
+        return money_pledge
 
     def validate_amount(self, value):
         """
@@ -163,16 +197,81 @@ class MoneyPledgeSerializer(serializers.ModelSerializer):
                 "Amount must be greater than zero."
             )
         return value
+    
+    def get_supporter_total_for_fundraiser(self, obj):
+        """
+        Total money this supporter has pledged to this fundraiser (all needs).
+        """
+        from django.db.models import Sum
+        from django.db.models.functions import Coalesce
+        from decimal import Decimal
 
+        pledge = obj.pledge
+        supporter = pledge.supporter
+        fundraiser = pledge.fundraiser
+
+        total = (
+            MoneyPledge.objects
+            .filter(
+                pledge__supporter=supporter,
+                pledge__fundraiser=fundraiser,
+            )
+            .aggregate(total=Coalesce(Sum("amount"), Decimal("0")))
+            ["total"]
+        )
+        # Return as string so it serializes nicely
+        return str(total)
 
 class TimePledgeSerializer(serializers.ModelSerializer):
     """
     Extra details for a time pledge.
     One-to-one with Pledge via Pledge.time_detail.
     """
+
     class Meta:
         model = TimePledge
         fields = "__all__"
+
+    def _apply_reward_tier(self, time_pledge):
+        """
+        Look at the related TimeNeed and apply its reward_tier
+        to the underlying Pledge, if present.
+        """
+        pledge = getattr(time_pledge, "pledge", None)
+        if not pledge:
+            return
+
+        need = getattr(pledge, "need", None)
+        if not need:
+            return
+
+        # From models: Need -> TimeNeed via related_name="time_detail"
+        time_need = getattr(need, "time_detail", None)
+        if not time_need:
+            return
+
+        reward = getattr(time_need, "reward_tier", None)
+        if reward:
+            pledge.reward_tier = reward
+            pledge.save(update_fields=["reward_tier"])
+
+    def create(self, validated_data):
+        """
+        Create a TimePledge and then apply any reward_tier
+        configured on the related TimeNeed.
+        """
+        time_pledge = super().create(validated_data)
+        self._apply_reward_tier(time_pledge)
+        return time_pledge
+
+    def update(self, instance, validated_data):
+        """
+        Update a TimePledge and re-apply reward_tier logic,
+        in case need/reward setup or timing changes.
+        """
+        time_pledge = super().update(instance, validated_data)
+        self._apply_reward_tier(time_pledge)
+        return time_pledge
 
     def validate(self, attrs):
         """
@@ -193,6 +292,7 @@ class TimePledgeSerializer(serializers.ModelSerializer):
         return attrs
 
 
+
 class ItemPledgeSerializer(serializers.ModelSerializer):
     """
     Extra details for an item pledge.
@@ -204,6 +304,53 @@ class ItemPledgeSerializer(serializers.ModelSerializer):
         model = ItemPledge
         fields = "__all__"
 
+    # ---------- INTERNAL HELPER ----------
+
+    def _update_rewards(self, item_pledge):
+        """
+        After creating/updating an ItemPledge, set pledge.reward_tier
+        based on:
+          - the ItemNeed for this pledge's Need
+          - fallback to ItemNeed.mode if item_pledge.mode is missing
+        """
+        pledge = item_pledge.pledge
+        need = pledge.need
+        if not need:
+            return
+
+        # Need → ItemNeed (via OneToOneField related_name="item_detail")
+        item_need = getattr(need, "item_detail", None)
+        if not item_need:
+            return
+
+        # Work out mode: prefer pledge.mode, fallback to item_need.mode
+        mode = getattr(item_pledge, "mode", None) or getattr(item_need, "mode", None)
+
+        tier = None
+        if mode == "donation":
+            tier = item_need.donation_reward_tier
+        elif mode == "loan":
+            tier = item_need.loan_reward_tier
+
+        # If a tier is found, update the pledge
+        if tier:
+            pledge.reward_tier = tier
+            pledge.save(update_fields=["reward_tier"])
+
+    # ---------- CREATE / UPDATE ----------
+
+    def create(self, validated_data):
+        item_pledge = super().create(validated_data)
+        self._update_rewards(item_pledge)
+        return item_pledge
+
+    def update(self, instance, validated_data):
+        item_pledge = super().update(instance, validated_data)
+        self._update_rewards(item_pledge)
+        return item_pledge
+
+    # ---------- READ-ONLY HELPER FIELD ----------
+
     def get_item_name(self, obj):
         """
         Safely walk pledge -> need -> item_detail.
@@ -212,12 +359,14 @@ class ItemPledgeSerializer(serializers.ModelSerializer):
         need = getattr(obj.pledge, "need", None)
         if not need:
             return None
-        
+
         item_detail = getattr(need, "item_detail", None)
         if not item_detail:
             return None
 
         return item_detail.item_name
+
+    # ---------- VALIDATION ----------
 
     def validate_quantity(self, value):
         """
@@ -228,6 +377,9 @@ class ItemPledgeSerializer(serializers.ModelSerializer):
                 "Quantity must be at least 1."
             )
         return value
+
+
+
 
 
 # ====================================================================================
@@ -257,8 +409,7 @@ class PledgeSerializer(serializers.ModelSerializer):
     need_title = serializers.CharField(source="need.title", read_only=True)
     need_id = serializers.IntegerField(source="need.id", read_only=True)
     need_type = serializers.CharField(source="need.need_type", read_only=True)
-    reward_tier_name = serializers.CharField(source="reward_tier.name", read_only=True
-    )
+    reward_tier_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Pledge
@@ -266,6 +417,53 @@ class PledgeSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ["date_created", "date_updated"]
 
+    def get_reward_tier_name(self, obj):
+        """
+        Human-readable reward name for THIS pledge.
+
+        - Money pledges: use the pledge.reward_tier (Bronze/Silver/Gold).
+        - Item pledges: use the item need's donation/loan reward tier based on mode.
+        - Time pledges: use the time need's reward_tier, if you have one.
+        """
+        need = obj.need
+        if not need:
+            # No need linked? fall back to whatever's on the pledge
+            tier = obj.reward_tier
+            return tier.name if tier else None
+
+        # --- MONEY PLEDGE: show Bronze/Silver/Gold (global tier) ---
+        if need.need_type == "money":
+            tier = obj.reward_tier
+            return tier.name if tier else None
+
+        # --- ITEM PLEDGE: show the gear reward for THIS pledge ---
+        if need.need_type == "item":
+            # Need's extra info
+            item_need = getattr(need, "item_detail", None)
+            # Pledge's extra info
+            item_pledge = getattr(obj, "item_detail", None)
+
+            if not item_need or not item_pledge:
+                return None
+
+            mode = item_pledge.mode  # "donation" or "loan"
+            if mode == "donation":
+                tier = item_need.donation_reward_tier
+            elif mode == "loan":
+                tier = item_need.loan_reward_tier
+            else:
+                tier = None
+
+            return tier.name if tier else None
+
+        # --- TIME PLEDGE: if you have a reward_tier on the time need, show that ---
+        if need.need_type == "time":
+            time_need = getattr(need, "time_detail", None)
+            if time_need and getattr(time_need, "reward_tier", None):
+                return time_need.reward_tier.name
+            return None
+
+        return None
 
 class PledgeDetailSerializer(PledgeSerializer):
     """
@@ -278,7 +476,7 @@ class PledgeDetailSerializer(PledgeSerializer):
     - extra id/title/type fields to make relationships obvious
     """
 
-    # Nested detail serializers (as you already had)
+    # Nested detail serializers 
     money_detail = MoneyPledgeSerializer(read_only=True)
     time_detail = TimePledgeSerializer(read_only=True)
     item_detail = ItemPledgeSerializer(read_only=True)

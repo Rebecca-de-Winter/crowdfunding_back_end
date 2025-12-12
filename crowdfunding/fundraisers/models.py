@@ -266,11 +266,26 @@ class ItemNeed(models.Model):
 ###########################################################################################################   
 
 class RewardTier(models.Model):
+    
+    REWARD_TYPE_CHOICES = [
+        ("money", "Money pledge"),
+        ("time", "Time pledge"),
+        ("item", "Item pledge"),
+    ]
+
     fundraiser = models.ForeignKey(
         Fundraiser,
         on_delete=models.CASCADE,
         related_name="reward_tiers",
     )
+
+    reward_type = models.CharField(
+        max_length=10,
+        choices=REWARD_TYPE_CHOICES,
+        default="money",
+        help_text="What kind of pledge this reward is for."
+    )
+
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     minimum_contribution_value = models.DecimalField(
@@ -278,11 +293,13 @@ class RewardTier(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Minimum cash amount for this reward (used for money pledges only).",
+        help_text="Minimum cash amount for this reward (used for money pledges only)."
     )
+
     image_url = models.URLField(blank=True)
     sort_order = models.IntegerField(default=0)
     max_backers = models.PositiveIntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.name} ({self.fundraiser.title})" # Returns a string like "VIP Pass (FundraiserName)"
+

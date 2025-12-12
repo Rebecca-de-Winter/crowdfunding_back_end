@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from django.db.models import Sum, Count
+from django.db.models.functions import Coalesce
 from decimal import Decimal
 
 from .models import (
@@ -664,26 +665,14 @@ class TimePledgeList(APIView):
         serializer = TimePledgeSerializer(data=request.data)
         if serializer.is_valid():
             pledge = serializer.validated_data.get("pledge")
-            # Check the supporter owns this pledge (existing behaviour)
             self.check_object_permissions(request, pledge)
 
-            # Save the TimePledge row
             time_pledge = serializer.save()
-
-            # --- NEW: auto-assign reward tier from the TimeNeed ---
-            need = pledge.need  # the Need this pledge is attached to
-            if need is not None and need.need_type == "time":
-                # Get the TimeNeed detail row, if it exists
-                time_need = getattr(need, "time_detail", None)
-                if time_need is not None:
-                    tier = time_need.reward_tier
-                    # Only set if a tier is configured and pledge doesn't already have one
-                    if tier is not None and pledge.reward_tier is None:
-                        pledge.reward_tier = tier
-                        pledge.save(update_fields=["reward_tier"])
-
-            return Response(TimePledgeSerializer(time_pledge).data, status=status.HTTP_201_CREATED)
+            return Response(TimePledgeSerializer(time_pledge).data,
+                        status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 class TimePledgeDetail(APIView):
     """
@@ -747,15 +736,19 @@ class ItemPledgeList(APIView):
         serializer = ItemPledgeSerializer(data=request.data)
         if serializer.is_valid():
             pledge = serializer.validated_data.get("pledge")
+            # make sure current user owns this pledge
             self.check_object_permissions(request, pledge)
 
-            # Save the ItemPledge row
+            # Save the ItemPledge row itself
             item_pledge = serializer.save()
 
-            # === NEW: auto-set reward tier based on donation vs loan ===
-            need = pledge.need
+            # --- NEW: auto-set pledge.reward_tier from the ItemNeed + mode ---
+            need = pledge.need  # the Need this pledge is attached to
+
             if need is not None and need.need_type == "item":
+                # item_detail is the ItemNeed row (your fog machine etc.)
                 item_need = getattr(need, "item_detail", None)
+
                 if item_need is not None:
                     chosen_mode = item_pledge.mode  # "donation" or "loan"
 
@@ -766,7 +759,8 @@ class ItemPledgeList(APIView):
                     else:
                         tier = None
 
-                    if tier is not None and pledge.reward_tier is None:
+                    if tier is not None:
+                        # Sync the FK to the correct tier (e.g. Gear Loan Champion)
                         pledge.reward_tier = tier
                         pledge.save(update_fields=["reward_tier"])
 
@@ -808,8 +802,28 @@ class ItemPledgeDetail(APIView):
         if serializer.is_valid():
             pledge = serializer.validated_data.get("pledge", item_pledge.pledge)
             self.check_object_permissions(request, pledge)
-            serializer.save()
-            return Response(serializer.data)
+
+            item_pledge = serializer.save()
+
+            # keep pledge.reward_tier in sync after updates too
+            need = pledge.need
+            if need is not None and need.need_type == "item":
+                item_need = getattr(need, "item_detail", None)
+                if item_need is not None:
+                    chosen_mode = item_pledge.mode
+                    if chosen_mode == "donation":
+                        tier = item_need.donation_reward_tier
+                    elif chosen_mode == "loan":
+                        tier = item_need.loan_reward_tier
+                    else:
+                        tier = None
+
+                    if tier is not None:
+                        pledge.reward_tier = tier
+                        pledge.save(update_fields=["reward_tier"])
+
+            return Response(ItemPledgeSerializer(item_pledge).data)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
@@ -827,11 +841,6 @@ class ItemPledgeDetail(APIView):
 # REPORTS
 # ====================================================================================
 
-from django.db.models import Sum, Count
-from decimal import Decimal
-
-# ... other imports above ...
-
 class FundraiserSummaryReport(APIView):
     """
     Read-only summary for a single fundraiser.
@@ -840,7 +849,7 @@ class FundraiserSummaryReport(APIView):
 
     Anyone can GET it.
 
-    Returns a big JSON blob with:
+    Returns a big JSON text report with:
     - money: targets, pledged, remaining, percentages
     - time: shifts needed vs volunteers, with per-shift detail
     - items: quantities needed vs pledged, with per-item detail
@@ -1378,6 +1387,156 @@ class FundraiserPledgesReport(APIView):
         }
 
         return Response(data)
+    
+class MyFundraiserRewardsReport(APIView):
+    """
+    For the CURRENTLY LOGGED-IN SUPPORTER:
+    Rewards summary for a single fundraiser.
+
+    URL: /reports/fundraisers/<pk>/my-rewards/
+
+    Returns:
+    - fundraiser: id, title
+    - supporter: id, username
+    - totals: money / time / items pledged to THIS fundraiser
+    - earned_money_reward_tiers: tiers unlocked based on total money pledged
+    - earned_other_reward_tiers: tiers granted via time/item pledges
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, pk):
+        try:
+            return Fundraiser.objects.get(pk=pk)
+        except Fundraiser.DoesNotExist:
+            raise Http404
+
+    def get(self, request, pk):
+        supporter = request.user
+        fundraiser = self.get_object(pk)
+        active_statuses = ["pending", "approved"]
+
+        # All of THIS supporter’s active pledges for THIS fundraiser
+        pledges_qs = (
+            Pledge.objects.filter(
+                fundraiser=fundraiser,
+                supporter=supporter,
+                status__in=active_statuses,
+            )
+            .select_related("reward_tier", "need")
+        )
+
+        # --- Totals across pledge detail tables, scoped to THESE pledges only ---
+
+        # MONEY
+        money_pledges_qs = MoneyPledge.objects.filter(
+            pledge__in=pledges_qs,
+            pledge__need__need_type="money",   # defensive: only money needs
+        )
+        total_money_pledged = (
+            money_pledges_qs.aggregate(total=Sum("amount"))["total"]
+            or Decimal("0")
+        )
+
+        # TIME
+        time_pledges_qs = TimePledge.objects.filter(
+            pledge__in=pledges_qs,
+            pledge__need__need_type="time",    # defensive: only time needs
+        )
+        total_time_hours = (
+            time_pledges_qs.aggregate(total=Sum("hours_committed"))["total"]
+            or Decimal("0")
+        )
+
+        # ITEMS
+        item_pledges_qs = ItemPledge.objects.filter(
+            pledge__in=pledges_qs,
+            pledge__need__need_type="item",    # defensive: only item needs
+        )
+        total_item_quantity = (
+            item_pledges_qs.aggregate(total=Sum("quantity"))["total"]
+            or 0
+        )
+
+        # ------------------------------------------------------------------
+        # Money-based reward tiers (threshold model)
+        # ONLY reward_type = "money"
+        # ------------------------------------------------------------------
+        money_tiers_qs = (
+            RewardTier.objects.filter(
+                fundraiser=fundraiser,
+                reward_type="money",
+                minimum_contribution_value__isnull=False,
+                minimum_contribution_value__lte=total_money_pledged,
+            )
+            .order_by("minimum_contribution_value", "id")
+            .values("id", "name", "description", "minimum_contribution_value")
+        )
+
+        earned_money_reward_tiers = [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "minimum_contribution_value": str(row["minimum_contribution_value"]),
+            }
+            for row in money_tiers_qs
+        ]
+
+        # ------------------------------------------------------------------
+        # Time / item-based reward tiers
+        # These are set directly on pledge.reward_tier.
+        # We EXCLUDE reward_type="money" so Gold can't appear here.
+        # ------------------------------------------------------------------
+        raw_other_tiers = (
+            pledges_qs
+            .exclude(reward_tier__isnull=True)
+            .exclude(reward_tier__reward_type="money")
+            .values(
+                "reward_tier__id",
+                "reward_tier__name",
+                "reward_tier__description",
+                "reward_tier__minimum_contribution_value",
+                "reward_tier__reward_type",
+            )
+            .distinct()
+        )
+
+        earned_other_reward_tiers = [
+            {
+                "id": row["reward_tier__id"],
+                "name": row["reward_tier__name"],
+                "description": row["reward_tier__description"],
+                "reward_type": row["reward_tier__reward_type"],
+                "minimum_contribution_value": (
+                    str(row["reward_tier__minimum_contribution_value"])
+                    if row["reward_tier__minimum_contribution_value"] is not None
+                    else None
+                ),
+            }
+            for row in raw_other_tiers
+        ]
+
+        data = {
+            "fundraiser": {
+                "id": fundraiser.id,
+                "title": fundraiser.title,
+            },
+            "supporter": {
+                "id": supporter.id,
+                "username": supporter.username,
+            },
+            "totals": {
+                "total_money_pledged": str(total_money_pledged),
+                "total_time_hours_pledged": str(total_time_hours),
+                "total_item_quantity_pledged": total_item_quantity,
+            },
+            "earned_money_reward_tiers": earned_money_reward_tiers,
+            "earned_other_reward_tiers": earned_other_reward_tiers,
+        }
+
+        return Response(data)
+
+
 
 
 class MyPledgesReport(APIView):
@@ -1435,6 +1594,5 @@ class MyPledgesReport(APIView):
             },
             "pledges": pledges_data,
         }
-
         return Response(data)
 

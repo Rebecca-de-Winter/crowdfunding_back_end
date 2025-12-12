@@ -64,7 +64,11 @@ urlpatterns = [
         views.MyPledgesReport.as_view(),
         name="my-pledges-report",
     ),
-
+    path(
+        "reports/fundraisers/<int:pk>/my-rewards/",
+        views.MyFundraiserRewardsReport.as_view(),
+        name="fundraiser-my-rewards-report",
+    ),
 
 
 ]
