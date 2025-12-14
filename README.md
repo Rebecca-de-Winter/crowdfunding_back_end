@@ -946,7 +946,7 @@ Each is linked by a OneToOne relationship to a base Need.
 | ---------------- | ------ | ----------------- | -------------------------------------------- | ------- | -------------------------------------- |
 | `/pledges/`      | GET    | List all pledges  | –                                            | 200     | Public                                 |
 | `/pledges/`      | POST   | Create a pledge   | `fundraiser`, `need`, `comment`, `anonymous` | 201     | Logged-in                              |
-| `/pledges/<id>/` | GET    | Retrieve a pledge | –                                            | 200     | Supporter or Fundraiser owner          |
+| `/pledges/<id>/` | GET    | Retrieve a pledge | –                                            | 200     | Public                                 |
 | `/pledges/<id>/` | PUT    | Update pledge     | `comment`, `anonymous`                       | 200     | Supporter only                         |
 | `/pledges/<id>/` | DELETE | Delete pledge     | –                                            | 204     | Supporter (only if `status = pending`) |
 
