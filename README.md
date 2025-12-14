@@ -1140,4 +1140,4 @@ This endpoint mirrors what a supporter would see in a personal “Rewards Dashbo
 
 ### DB Schema
 
-![Backyard Festival ERD](docs/backyard_festival_ERD.png)
+![ERD_FINAL](docs/Backyard_Festival_Final.png)
