@@ -155,7 +155,7 @@ Time and item needs may have reward tiers assigned directly on the need:
 
 #### TimeNeed:
 
-- time_reward_tier
+- reward_tier
 
 Each time a supporter creates or updates a TimePledge or ItemPledge, the backend:
 
@@ -193,6 +193,8 @@ This is to avoid obvious duplication of rewards given.
 4. Attach your rewards to needs (unless already created when need was made)
 5. Start accepting pledges
 
+Alternatively, if you have a clear idea of what rewards you want to give before you have written your needs, you can create your rewards first, then update the needs with the corresponding reward_tier id as you go. This is a faster way updating the app.
+
 ## Fundraiser Templates (Owner Tools)
 
 Fundraiser templates are a shortcut for organisers who regularly run similar events  
@@ -216,22 +218,42 @@ This lets you spin up a fully pre-configured fundraiser in one request.
 
 ### How templates are used (owner flow)
 
-#### 1. Create a template
+#### 1. Create a template (POST)
 
-Define a reusable pattern that includes a base fundraiser, its needs, and reward tiers.
+Define a reusable pattern that includes a base fundraiser.
 
-#### 2. Create a new blank fundraiser
+![Base Fundraiser](docs/fundraiserTemplate.png)
+
+#### 2. Create template reward tiers (POST)
+
+This step is where you decide what rewards to allocate in your new fundraiser template. You can create rewards for all three need types (money, item, time) using this same URL.
+
+**Important:** if you want to create a money reward, you need to set a minimum contribution value. Fields such as max_backers (how many rewards can be allocated per fundraiser) and sort_order (order ranking) are optional for all rewards. This step is interchangeable with doing template needs first, however if you get the rewards done first, they will show up once you POST template needs.
+
+![Template Reward Tiers](docs/template-reward-tiers.png)
+
+#### 3. Create your template needs (POST)
+
+Define a reusable pattern of templated base and detailed needs. All three need types (money, time, items) can use the same template.
+
+Note in the example below, that once posted, the rewards that were defined in the last step are married up with the needs.
+
+This means once created, you will have a fundraiser, with needs and relevant rewards attached.
+
+![Fundraiser Template Needs](docs/FundraiserTemplateNeeds.png)
+
+#### 4. Create a new blank fundraiser (POST)
 
 Use `POST /fundraisers/` to create the live fundraiser you want to run  
 (e.g. “BBQ for School Music Program”).  
 At this point, it should **not** have any needs or reward tiers yet.
 
-#### 3. Apply the template to the new fundraiser
+#### 5. Apply the template to the new fundraiser
 
 Call:
 
 ```http
-POST /fundraisers/<id>/apply-template/
+POST /fundraisers/apply-template/
 ```
 
 Paste in your fundraiser_id and template_id as shown:
@@ -243,7 +265,7 @@ This is where:
 - "id" is the new fundraiser you just created
 - "template_id" is the ID of the template you want to copy from
 
-#### 4. Edit and customise
+#### 6. Edit and customise
 
 After applying the template, you can adjust:
 
@@ -635,7 +657,7 @@ This second step is where:
 
   - Looks up the associated TimeNeed (via the base pledge’s need)
 
-  - Reads any time_reward_tier attached to that TimeNeed
+  - Reads any reward_tier attached to that TimeNeed
 
 - If a tier is set, stamps it onto Pledge.reward_tier
 
@@ -758,7 +780,8 @@ All endpoints return and accept JSON.
 Authentication is via **Token Auth** using:
 
 - `POST /api-token-auth/` with `username` and `password`
-- Then send `Authorization: Token <your-token>` in headers for authenticated actions.
+- In Insomnia: Auth = Bearer Token, Token = <your-token>, Prefix = Token
+  (This produces Authorization: Token <your-token>)
 
 | URL                | Method | Purpose                         | Request Body                    | Success | Auth  |
 | ------------------ | ------ | ------------------------------- | ------------------------------- | ------- | ----- |
@@ -785,7 +808,7 @@ Authentication is via **Token Auth** using:
 | `/fundraisers/`      | GET    | List all fundraisers                   | –                                                                                                                           | 200     | None       |
 | `/fundraisers/`      | POST   | Create a fundraiser                    | `title`, `description`, `goal`, `image_url`, `location`, `start_date`, `end_date`, `status`, `enable_rewards`, `sort_order` | 201     | Logged-in  |
 | `/fundraisers/<id>/` | GET    | Retrieve a single fundraiser           | –                                                                                                                           | 200     | None       |
-| `/fundraisers/<id>/` | PUT    | Update fundraiser                      | Same fields as POST (partial updates allowed)                                                                               | 200     | Owner only |
+| `/fundraisers/<id>/` | PUT    | Update fundraiser                      | Same fields as POST (partial updates allowed on PUT)                                                                        | 200     | Owner only |
 | `/fundraisers/<id>/` | DELETE | Delete fundraiser (only if no pledges) | –                                                                                                                           | 204     | Owner only |
 
 ### Example: Create Fundraiser (POST `/fundraisers/`)
@@ -821,7 +844,7 @@ Authentication is via **Token Auth** using:
 | `/needs/`                 | POST   | Create a base need               | `fundraiser`, `need_type`, `title`, `description`, `status`, `priority`, `sort_order` | 201     | Fundraiser owner |
 | `/needs/?fundraiser=<id>` | GET    | List needs for fundraiser        | -                                                                                     | 200     | None             |
 | `/needs/<id>/`            | GET    | Retrieve a single need           | –                                                                                     | 200     | None             |
-| `/needs/<id>/`            | PUT    | Update need                      | Same fields as POST (partial updates allowed)                                         | 200     | Fundraiser owner |
+| `/needs/<id>/`            | PUT    | Update need                      | Same fields as POST (partial updates allowed on PUT)                                  | 200     | Fundraiser owner |
 | `/needs/<id>/`            | DELETE | Delete need (only if no pledges) | –                                                                                     | 204     | Fundraiser owner |
 
 ### Example: Create Need (POST/needs)
@@ -919,13 +942,13 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Base Pledge
 
-| URL              | Method | Purpose           | Request Body                                                           | Success | Auth                                      |
-| ---------------- | ------ | ----------------- | ---------------------------------------------------------------------- | ------- | ----------------------------------------- |
-| `/pledges/`      | GET    | List all pledges  | –                                                                      | 200     | Logged-in or Public (depending on config) |
-| `/pledges/`      | POST   | Create a pledge   | `fundraiser`, `need`, `comment`, `anonymous`, `reward_tier (optional)` | 201     | Logged-in                                 |
-| `/pledges/<id>/` | GET    | Retrieve a pledge | –                                                                      | 200     | Supporter or Fundraiser owner             |
-| `/pledges/<id>/` | PUT    | Update pledge     | `comment`, `anonymous`, `status`, `reward_tier`                        | 200     | Supporter only                            |
-| `/pledges/<id>/` | DELETE | Delete pledge     | –                                                                      | 204     | Supporter (only if `status = pending`)    |
+| URL              | Method | Purpose           | Request Body                                 | Success | Auth                                   |
+| ---------------- | ------ | ----------------- | -------------------------------------------- | ------- | -------------------------------------- |
+| `/pledges/`      | GET    | List all pledges  | –                                            | 200     | Public                                 |
+| `/pledges/`      | POST   | Create a pledge   | `fundraiser`, `need`, `comment`, `anonymous` | 201     | Logged-in                              |
+| `/pledges/<id>/` | GET    | Retrieve a pledge | –                                            | 200     | Supporter or Fundraiser owner          |
+| `/pledges/<id>/` | PUT    | Update pledge     | `comment`, `anonymous`                       | 200     | Supporter only                         |
+| `/pledges/<id>/` | DELETE | Delete pledge     | –                                            | 204     | Supporter (only if `status = pending`) |
 
 ### Example: Get Pledge (GET/pledges)
 
@@ -953,7 +976,7 @@ Each is linked by a OneToOne relationship to a base Need.
 
 ### Example: Create Money Pledge (POST/money-pledges)
 
-![POST Money Pledges](image-21.png)
+![POST Money Pledges](docs/image-21.png)
 
 ### Time Pledge
 
@@ -978,7 +1001,7 @@ Each is linked by a OneToOne relationship to a base Need.
 | URL                   | Method | Purpose             | Request Body                                                              | Success | Auth                          |
 | --------------------- | ------ | ------------------- | ------------------------------------------------------------------------- | ------- | ----------------------------- |
 | `/item-pledges/`      | POST   | Create ItemPledge   | `pledge`, `quantity`, `mode ("donation" or "loan")`, `comment (optional)` | 201     | Supporter only                |
-| `/item-pledges/`      | GET    | List MoneyPledges   | –                                                                         | 200     | Supporter or Fundraiser owner |
+| `/item-pledges/`      | GET    | List ItemPledges    | –                                                                         | 200     | Supporter or Fundraiser owner |
 | `/item-pledges/<id>/` | GET    | Retrieve ItemPledge | –                                                                         | 200     | Supporter or Fundraiser owner |
 | `/item-pledges/<id>/` | PUT    | Update ItemPledge   | Same fields as POST                                                       | 200     | Supporter only                |
 | `/item-pledges/<id>/` | DELETE | Delete ItemPledge   | –                                                                         | 204     | Supporter only                |
@@ -1014,16 +1037,54 @@ They can also be attached to pledges (for money, time, or item pledges) so suppo
 
 ## Fundraiser Templates
 
-Fundraiser templates let organisers define reusable starter configurations and then apply them to new fundraisers.
+Fundraiser templates let organisers define reusable starter configurations and apply them to new fundraisers.
 
-| URL                                 | Method | Purpose                                   | Request Body                         | Success | Auth             |
-| ----------------------------------- | ------ | ----------------------------------------- | ------------------------------------ | ------- | ---------------- |
-| `/fundraiser-templates/`            | GET    | List all fundraiser templates             | –                                    | 200     | Logged-in        |
-| `/fundraiser-templates/`            | POST   | Create a new fundraiser template          | Template fields (as for fundraisers) | 201     | Logged-in        |
-| `/fundraiser-templates/<id>/`       | GET    | Retrieve a single template                | –                                    | 200     | Logged-in        |
-| `/fundraiser-templates/<id>/`       | PUT    | Update a template                         | Same fields as POST                  | 200     | Template owner   |
-| `/fundraiser-templates/<id>/`       | DELETE | Delete a template                         | –                                    | 204     | Template owner   |
-| `/fundraisers/<id>/apply-template/` | POST   | Apply a template to a specific fundraiser | `{ "template_id": <template_id> }`   | 200     | Fundraiser owner |
+Applying a template copies needs and reward tiers into the selected fundraiser.
+Any edits made afterward affect only the new fundraiser, not the original template.
+
+Templates are publicly browseable, allowing organisers to preview available starter configurations before choosing one.
+
+Templates are publicly browseable (active templates only). Creating, editing, and deleting templates is restricted to staff/admin users.
+
+| URL                           | Method | Purpose                          | Request Body                         | Success | Auth                            |
+| ----------------------------- | ------ | -------------------------------- | ------------------------------------ | ------- | ------------------------------- |
+| `/fundraiser-templates/`      | GET    | List all fundraiser templates    | –                                    | 200     | Public (lists active templates) |
+| `/fundraiser-templates/`      | POST   | Create a new fundraiser template | Template fields (as for fundraisers) | 201     | Staff/admin only                |
+| `/fundraiser-templates/<id>/` | GET    | Retrieve a single template       | –                                    | 200     | Public                          |
+| `/fundraiser-templates/<id>/` | PUT    | Update a template                | Same fields as POST                  | 200     | Staff/admin only                |
+| `/fundraiser-templates/<id>/` | DELETE | Delete a template                | –                                    | 204     | Staff/admin only                |
+
+Future improvements: support user-created templates; restrict edits/deletes to template owners.
+
+## Template Reward Tiers
+
+Template reward tiers act as blueprints for real RewardTier objects when a template is applied.
+
+| URL                            | Method | Purpose                         | Request Body                                                                                                 | Success | Auth             |
+| ------------------------------ | ------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------- | ---------------- |
+| `/template-reward-tiers/`      | GET    | List all template reward tiers  | –                                                                                                            | 200     | Public           |
+| `/template-reward-tiers/`      | POST   | Create a template reward tier   | `template`, `reward_type`, `name`, `description`, `minimum_contribution_value` (money only), optional fields | 201     | Staff/admin only |
+| `/template-reward-tiers/<id>/` | GET    | Retrieve a template reward tier | –                                                                                                            | 200     | Public           |
+| `/template-reward-tiers/<id>/` | PUT    | Update a template reward tier   | Same fields as POST                                                                                          | 200     | Staff/admin only |
+| `/template-reward-tiers/<id>/` | DELETE | Delete a template reward tier   | –                                                                                                            | 204     | Staff/admin only |
+
+## Template Needs
+
+Template needs define reusable base and detailed needs (money, time, item) that will be cloned into a fundraiser.
+
+| URL                     | Method | Purpose                  | Request Body                                                                         | Success | Auth             |
+| ----------------------- | ------ | ------------------------ | ------------------------------------------------------------------------------------ | ------- | ---------------- |
+| `/template-needs/`      | GET    | List all template needs  | –                                                                                    | 200     | Public           |
+| `/template-needs/`      | POST   | Create a template need   | `template`, `need_type`, base fields + subtype fields + optional reward template ids | 201     | Staff/admin only |
+| `/template-needs/<id>/` | GET    | Retrieve a template need | –                                                                                    | 200     | Public           |
+| `/template-needs/<id>/` | PUT    | Update a template need   | Same fields as POST                                                                  | 200     | Staff/admin only |
+| `/template-needs/<id>/` | DELETE | Delete a template need   | –                                                                                    | 204     | Staff/admin only |
+
+## Apply Template to Fundraiser
+
+| URL                            | Method | Purpose                                          | Request Body                               | Success | Auth                           |
+| ------------------------------ | ------ | ------------------------------------------------ | ------------------------------------------ | ------- | ------------------------------ |
+| `/fundraisers/apply-template/` | POST   | Apply a template to an existing empty fundraiser | `{ "fundraiser_id": X, "template_id": Y }` | 200     | Logged in and Fundraiser owner |
 
 ## Reporting Endpoints
 
@@ -1047,9 +1108,9 @@ Fundraiser templates let organisers define reusable starter configurations and t
 
 ### Fundraiser Pledges Report
 
-| URL                                  | Method | Purpose                                | Request Body | Success | Auth |
-| ------------------------------------ | ------ | -------------------------------------- | ------------ | ------- | ---- |
-| `/reports/fundraisers/<id>/pledges/` | GET    | Returns all pledges for the fundraiser | –            | 200     | None |
+| URL                                  | Method | Purpose                                | Request Body | Success | Auth             |
+| ------------------------------------ | ------ | -------------------------------------- | ------------ | ------- | ---------------- |
+| `/reports/fundraisers/<id>/pledges/` | GET    | Returns all pledges for the fundraiser | –            | 200     | Fundraiser owner |
 
 ### My Pledges
 

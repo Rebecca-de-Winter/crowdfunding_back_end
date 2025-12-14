@@ -395,26 +395,72 @@ class PledgeSerializer(serializers.ModelSerializer):
 
     Notes:
     - supporter is read-only and comes from the logged-in user in the view
-    - supporter_username is a convenience field for the frontend. 
+    - supporter_username is a convenience field for the frontend. Supporter is NOT exposed if anonymous=True (returns None)
     - The benefits are on the frontend, you don’t have to go look up the user’s username separately just to display “Janet pledged $50”.
+    - If pledge is anonymous: hide identity from everyone except the supporter. (Owner cannot see.)
+    - If pledge is NOT anonymous: identity shown only to supporter and fundraiser owner.
+    - Everyone else gets None.
     """
-    supporter = serializers.ReadOnlyField(source="supporter.id")
-    supporter_username = serializers.ReadOnlyField(source="supporter.username")
 
-    # Relationship helpers
+    supporter = serializers.SerializerMethodField(read_only=True)
+    supporter_username = serializers.SerializerMethodField(read_only=True)
+
     fundraiser_title = serializers.CharField(source="fundraiser.title", read_only=True)
     fundraiser_id = serializers.IntegerField(source="fundraiser.id", read_only=True)
 
     need_title = serializers.CharField(source="need.title", read_only=True)
     need_id = serializers.IntegerField(source="need.id", read_only=True)
     need_type = serializers.CharField(source="need.need_type", read_only=True)
-    reward_tier_name = serializers.SerializerMethodField()
+
+    reward_tier_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Pledge
-        # includes model fields + extra declared fields like supporter_username
         fields = "__all__"
-        read_only_fields = ["date_created", "date_updated"]
+
+        # Make sure NOTHING can write these from the client
+        read_only_fields = [
+            "supporter",          # our method field (already read-only, but explicit is fine)
+            "supporter_username",
+            "reward_tier",        # not set by by client
+            "date_created",
+            "date_updated",
+        ]
+
+    # ---- identity helpers ----
+
+    def _request_user(self):
+        request = self.context.get("request")
+        return getattr(request, "user", None)
+
+    def _is_owner_or_supporter(self, obj):
+        user = self._request_user()
+        if not user or not user.is_authenticated:
+            return False
+        return (user == obj.supporter) or (user == obj.fundraiser.owner)
+
+    def get_supporter(self, obj):
+        # - anonymous pledge => only supporter can see
+        # - non-anonymous => supporter or owner can see
+        user = self._request_user()
+        if not user or not user.is_authenticated:
+            return None
+
+        if obj.anonymous:
+            return obj.supporter_id if user == obj.supporter else None
+
+        return obj.supporter_id if self._is_owner_or_supporter(obj) else None
+
+    def get_supporter_username(self, obj):
+        user = self._request_user()
+        if not user or not user.is_authenticated:
+            return None
+
+        if obj.anonymous:
+            return obj.supporter.username if user == obj.supporter else None
+
+        return obj.supporter.username if self._is_owner_or_supporter(obj) else None
+
 
     def get_reward_tier_name(self, obj):
         """
@@ -513,7 +559,12 @@ class NeedDetailSerializer(NeedSerializer):
         fields = NeedSerializer.Meta.fields
 
     def get_pledges(self, obj):
-        return PledgeSerializer(obj.pledges.all(), many=True).data
+        return PledgeSerializer(
+            obj.pledges.all(),
+            many=True,
+            context=self.context
+        ).data
+
 
 
 

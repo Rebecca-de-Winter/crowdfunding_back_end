@@ -1,36 +1,39 @@
 from rest_framework import permissions
-from .models import Fundraiser, Need, MoneyNeed, TimeNeed, ItemNeed, RewardTier
-
+from .models import (
+    Fundraiser, Need, MoneyNeed, TimeNeed, ItemNeed, RewardTier,
+    FundraiserTemplate, TemplateNeed, TemplateRewardTier,
+)
 
 class IsOwnerOrReadOnly(permissions.BasePermission):
-    """
-    SAFE METHODS (GET / LIST) → allowed for anyone
-    WRITE METHODS (PUT / POST / DELETE) → only fundraiser owner allowed
-    """
-
     def has_object_permission(self, request, view, obj):
 
-        # Always allow GET/SAFE reads
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # --- Direct fundraiser ---
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        # Fundraiser + its related objects
         if isinstance(obj, Fundraiser):
-            return obj.owner == request.user
+            return obj.owner_id == request.user.id
 
-        # --- Need links back to Fundraiser ---
         if isinstance(obj, Need):
-            return obj.fundraiser.owner == request.user
+            return obj.fundraiser.owner_id == request.user.id
 
-        # --- Detail models ---
         if isinstance(obj, (MoneyNeed, TimeNeed, ItemNeed)):
-            return obj.need.fundraiser.owner == request.user
+            return obj.need.fundraiser.owner_id == request.user.id
 
-        # --- Reward tiers also belong to a fundraiser ---
         if isinstance(obj, RewardTier):
-            return obj.fundraiser.owner == request.user
+            return obj.fundraiser.owner_id == request.user.id
 
-        return False   # default deny
+        # Templates
+        if isinstance(obj, FundraiserTemplate):
+            return (obj.owner_id == request.user.id) or request.user.is_staff
+
+        if isinstance(obj, (TemplateNeed, TemplateRewardTier)):
+            return (obj.template.owner_id == request.user.id) or request.user.is_staff
+
+        return False
 
 
 class IsSupporterOrReadOnly(permissions.BasePermission):
@@ -43,3 +46,22 @@ class IsSupporterOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
         return obj.supporter == request.user
+    
+    
+from rest_framework import permissions
+
+class IsAdminUserOrReadOnly(permissions.BasePermission):
+    """
+    SAFE METHODS: anyone
+    WRITE METHODS: staff only
+    """
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_staff)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_staff)
+
