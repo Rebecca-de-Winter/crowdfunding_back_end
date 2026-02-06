@@ -1,4 +1,5 @@
 from django.http import Http404
+from rest_framework.generics import CreateAPIView
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -6,10 +7,16 @@ from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from .models import CustomUser
 from .serializers import CustomUserSerializer
+from .serializers import SignUpSerializer
 
 class CustomUserList(APIView):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticatedOrReadOnly()]
+
     def get(self, request):
         users = CustomUser.objects.all()
         serializer = CustomUserSerializer(users, many=True)
@@ -19,14 +26,15 @@ class CustomUserList(APIView):
         serializer = CustomUserSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(
-                serializer.data,
-                status=status.HTTP_201_CREATED
-            )
-        return Response(
-            serializer.errors, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class SignUpView(CreateAPIView):
+    queryset = CustomUser.objects.all()
+    serializer_class = SignUpSerializer
+    permission_classes = [permissions.AllowAny]
+
 
 class CustomUserDetail(APIView):
     def get_object(self, pk):
@@ -41,6 +49,7 @@ class CustomUserDetail(APIView):
         return Response(serializer.data)
 
 class CustomAuthToken(ObtainAuthToken):
+    permission_classes = [permissions.AllowAny]
     def post(self, request, *args, **kwargs):
         serializer = self.serializer_class(
             data=request.data,
@@ -54,4 +63,15 @@ class CustomAuthToken(ObtainAuthToken):
             'token': token.key,
             'user_id': user.id,
             'email': user.email
+        })
+    
+class CurrentUserView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
         })

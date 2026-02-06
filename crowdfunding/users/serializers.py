@@ -13,3 +13,13 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return CustomUser.objects.create_user(**validated_data)
+    
+class SignUpSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = CustomUser
+        fields = ["id", "username", "password", "first_name", "last_name", "email"]
+
+    def create(self, validated_data):
+        return CustomUser.objects.create_user(**validated_data)

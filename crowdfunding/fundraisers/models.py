@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.core.exceptions import ValidationError
+
 
 # Create your models here.
 
@@ -301,8 +303,28 @@ class RewardTier(models.Model):
     sort_order = models.IntegerField(default=0)
     max_backers = models.PositiveIntegerField(null=True, blank=True)
 
+    def clean(self):
+        # Strip minimum contribution for non-money rewards
+        if self.reward_type != "money":
+            self.minimum_contribution_value = None
+
+        # Optional validation
+        if (
+            self.reward_type == "money"
+            and self.minimum_contribution_value is not None
+            and self.minimum_contribution_value < 0
+        ):
+            raise ValidationError({
+                "minimum_contribution_value": "Must be 0 or greater."
+            })
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.name} ({self.fundraiser.title})" # Returns a string like "VIP Pass (FundraiserName)"
+    
 
 ############################################################################################################
 
