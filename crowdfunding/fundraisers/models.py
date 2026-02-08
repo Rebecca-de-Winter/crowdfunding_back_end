@@ -9,8 +9,8 @@ from django.core.exceptions import ValidationError
 class Fundraiser(models.Model):
 
     STATUS_CHOICES = [
-        ("draft", "Draft"),
-        ("active", "Active"),
+        ("draft", "Draft (Unpublished)"),
+        ("active", "Active (Published)"),
         ("closed", "Closed"),
         ("cancelled", "Cancelled"),
     ]
@@ -162,8 +162,8 @@ class Need(models.Model):
     ]
     STATUS_CHOICES = [
         ("open", "Open"),
-        ("partial", "Partial"),
         ("filled", "Filled"),
+        ("closed", "Closed"),
         ("cancelled", "Cancelled"),
     ]
     PRIORITY_CHOICES = [
