@@ -9,6 +9,12 @@ urlpatterns = [
     # Base pledges
     path("pledges/", views.PledgeList.as_view(), name="pledge-list"),
     path("pledges/<int:pk>/", views.PledgeDetail.as_view(), name="pledge-detail"),
+    
+    # Pledge actions (organiser + supporter)
+    path("pledges/<int:pk>/cancel/", views.PledgeCancel.as_view(), name="pledge-cancel"),
+    path("pledges/<int:pk>/approve/", views.PledgeApprove.as_view(), name="pledge-approve"),
+    path("pledges/<int:pk>/decline/", views.PledgeDecline.as_view(), name="pledge-decline"),
+
 
     # Base needs
     path("needs/", views.NeedList.as_view(), name="need-list"),

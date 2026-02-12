@@ -414,6 +414,10 @@ class PledgeSerializer(serializers.ModelSerializer):
 
     reward_tier_name = serializers.SerializerMethodField(read_only=True)
 
+    money_detail = MoneyPledgeSerializer(read_only=True)
+    time_detail = TimePledgeSerializer(read_only=True)
+    item_detail = ItemPledgeSerializer(read_only=True)
+
     class Meta:
         model = Pledge
         fields = "__all__"

@@ -4,6 +4,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
+from .utils import ensure_allowed_transition
+from .permissions import IsFundraiserOwner, IsSupporterOrFundraiserOwner
 
 
 from django.db.models import Sum, Count
@@ -232,6 +234,60 @@ class PledgeDetail(APIView):
         pledge.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+class PledgeCancel(APIView):
+    
+    permission_classes = [permissions.IsAuthenticated, IsSupporterOrFundraiserOwner]
+
+    def post(self, request, pk):
+        try:
+            pledge = Pledge.objects.select_related("fundraiser", "supporter").get(pk=pk)
+        except Pledge.DoesNotExist:
+            raise Http404
+
+        self.check_object_permissions(request, pledge)
+
+        actor_role = "owner" if pledge.fundraiser.owner_id == request.user.id else "supporter"
+        ensure_allowed_transition(current=pledge.status, target="cancelled", actor_role=actor_role)
+
+        pledge.status = "cancelled"
+        pledge.save(update_fields=["status"])
+        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
+
+
+class PledgeApprove(APIView):
+
+    permission_classes = [permissions.IsAuthenticated, IsFundraiserOwner]
+    
+    def post(self, request, pk):
+        try:
+            pledge = Pledge.objects.select_related("fundraiser", "supporter").get(pk=pk)
+        except Pledge.DoesNotExist:
+            raise Http404
+
+        self.check_object_permissions(request, pledge)
+
+        ensure_allowed_transition(current=pledge.status, target="approved", actor_role="owner")
+        pledge.status = "approved"
+        pledge.save(update_fields=["status"])
+        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
+
+
+class PledgeDecline(APIView):
+
+    permission_classes = [permissions.IsAuthenticated, IsFundraiserOwner]
+
+    def post(self, request, pk):
+        try:
+            pledge = Pledge.objects.select_related("fundraiser", "supporter").get(pk=pk)
+        except Pledge.DoesNotExist:
+            raise Http404
+
+        self.check_object_permissions(request, pledge)
+
+        ensure_allowed_transition(current=pledge.status, target="declined", actor_role="owner")
+        pledge.status = "declined"
+        pledge.save(update_fields=["status"])
+        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
 
 # ====================================================================================
 # NEEDS (BASE)
@@ -2056,3 +2112,87 @@ class TemplateNeedDetail(APIView):
         need = self.get_object(pk)
         need.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+from rest_framework.permissions import IsAuthenticated
+
+class PledgeCancel(APIView):
+    """
+    POST /pledges/<pk>/cancel/
+
+    Rules:
+    - Supporter can cancel ONLY while pledge.status == "pending"
+    - Fundraiser owner (organiser) can cancel even if pledge is "approved"
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            pledge = Pledge.objects.select_related("fundraiser", "supporter").get(pk=pk)
+        except Pledge.DoesNotExist:
+            raise Http404
+
+        is_supporter = pledge.supporter_id == request.user.id
+        is_owner = pledge.fundraiser.owner_id == request.user.id
+
+        if not (is_supporter or is_owner):
+            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Supporter restriction
+        if is_supporter and pledge.status != "pending":
+            return Response(
+                {"detail": "Supporters can only cancel pending pledges."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Owner can cancel pending/approved (and anything else you want)
+        pledge.status = "cancelled"
+        pledge.save(update_fields=["status"])
+
+        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
+
+
+class PledgeApprove(APIView):
+    """
+    POST /pledges/<pk>/approve/
+
+    Rules:
+    - Only fundraiser owner can approve
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            pledge = Pledge.objects.select_related("fundraiser").get(pk=pk)
+        except Pledge.DoesNotExist:
+            raise Http404
+
+        if pledge.fundraiser.owner_id != request.user.id:
+            return Response({"detail": "Only the organiser can approve pledges."}, status=status.HTTP_403_FORBIDDEN)
+
+        pledge.status = "approved"
+        pledge.save(update_fields=["status"])
+
+        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
+
+
+class PledgeDecline(APIView):
+    """
+    POST /pledges/<pk>/decline/
+
+    Rules:
+    - Only fundraiser owner can decline
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            pledge = Pledge.objects.select_related("fundraiser").get(pk=pk)
+        except Pledge.DoesNotExist:
+            raise Http404
+
+        if pledge.fundraiser.owner_id != request.user.id:
+            return Response({"detail": "Only the organiser can decline pledges."}, status=status.HTTP_403_FORBIDDEN)
+
+        pledge.status = "declined"
+        pledge.save(update_fields=["status"])
+
+        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
