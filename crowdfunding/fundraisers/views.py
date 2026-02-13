@@ -1888,15 +1888,18 @@ class ApplyTemplateToFundraiser(APIView):
 
                 # Time need
                 elif tneed.need_type == "time":
-                    # ✅ Templates are allowed to have NO schedule yet.
-                    # Only enforce the fields that make a time-need usable as a template.
+                    # Guard against missing required fields for TimeNeed
                     missing = []
-                    
+                    if not tneed.start_datetime:
+                        missing.append("start_datetime")
+                    if not tneed.end_datetime:
+                        missing.append("end_datetime")
                     if tneed.volunteers_needed is None:
                         missing.append("volunteers_needed")
                     if not tneed.role_title:
                         missing.append("role_title")
-
+                    if not tneed.location:
+                        missing.append("location")
 
                     if missing:
                         raise ValidationError({
@@ -1908,17 +1911,17 @@ class ApplyTemplateToFundraiser(APIView):
 
                     time_reward = None
                     if tneed.time_reward_template:
-                        time_reward = template_to_real_reward.get(tneed.time_reward_template.id)
+                        time_reward = template_to_real_reward.get(
+                            tneed.time_reward_template.id
+                        )
 
                     TimeNeed.objects.create(
                         need=need,
-                        # ✅ these can be null in templates
                         start_datetime=tneed.start_datetime,
                         end_datetime=tneed.end_datetime,
                         volunteers_needed=tneed.volunteers_needed,
                         role_title=tneed.role_title,
-                        # ✅ allow template location to be blank/null too
-                        location=tneed.location or "",
+                        location=tneed.location,
                         reward_tier=time_reward,
                     )
 
