@@ -684,6 +684,9 @@ class TemplateNeedSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
 
+    start_datetime = serializers.DateTimeField(required=False, allow_null=True)
+    end_datetime = serializers.DateTimeField(required=False, allow_null=True)
+    
     class Meta:
         model = TemplateNeed
         fields = [
