@@ -32,6 +32,8 @@ class Fundraiser(models.Model):
     sort_order = models.IntegerField(default=0)
     date_created = models.DateTimeField(auto_now_add=True)
     date_updated = models.DateTimeField(auto_now=True)
+    require_pledge_approval = models.BooleanField(default=True)
+
 
     owner = models.ForeignKey(
         get_user_model(),

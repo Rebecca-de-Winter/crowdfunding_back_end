@@ -177,11 +177,29 @@ class PledgeList(APIView):
         if serializer.is_valid():
             pledge = serializer.save(supporter=request.user)
 
+            # ✅ Decide whether this pledge starts as pending or approved,
+            # based on the fundraiser's setting.
+            fundraiser = pledge.fundraiser  # already a model instance
+            # (optional but safest)
+            fundraiser.refresh_from_db(fields=["require_pledge_approval"])
+
+
+            if getattr(fundraiser, "require_pledge_approval", True):
+                new_status = "pending"
+            else:
+                new_status = "approved"
+
+            # Only write if it needs changing (avoids extra DB writes)
+            if pledge.status != new_status:
+                pledge.status = new_status
+                pledge.save(update_fields=["status"])
+
             # return a fresh representation (with request context)
             out = PledgeSerializer(pledge, context={"request": request}).data
             return Response(out, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 
@@ -1870,18 +1888,15 @@ class ApplyTemplateToFundraiser(APIView):
 
                 # Time need
                 elif tneed.need_type == "time":
-                    # Guard against missing required fields for TimeNeed
+                    # ✅ Templates are allowed to have NO schedule yet.
+                    # Only enforce the fields that make a time-need usable as a template.
                     missing = []
-                    if not tneed.start_datetime:
-                        missing.append("start_datetime")
-                    if not tneed.end_datetime:
-                        missing.append("end_datetime")
+                    
                     if tneed.volunteers_needed is None:
                         missing.append("volunteers_needed")
                     if not tneed.role_title:
                         missing.append("role_title")
-                    if not tneed.location:
-                        missing.append("location")
+
 
                     if missing:
                         raise ValidationError({
@@ -1893,17 +1908,17 @@ class ApplyTemplateToFundraiser(APIView):
 
                     time_reward = None
                     if tneed.time_reward_template:
-                        time_reward = template_to_real_reward.get(
-                            tneed.time_reward_template.id
-                        )
+                        time_reward = template_to_real_reward.get(tneed.time_reward_template.id)
 
                     TimeNeed.objects.create(
                         need=need,
+                        # ✅ these can be null in templates
                         start_datetime=tneed.start_datetime,
                         end_datetime=tneed.end_datetime,
                         volunteers_needed=tneed.volunteers_needed,
                         role_title=tneed.role_title,
-                        location=tneed.location,
+                        # ✅ allow template location to be blank/null too
+                        location=tneed.location or "",
                         reward_tier=time_reward,
                     )
 

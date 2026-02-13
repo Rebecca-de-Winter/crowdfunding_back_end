@@ -429,6 +429,7 @@ class PledgeSerializer(serializers.ModelSerializer):
             "reward_tier",        # not set by by client
             "date_created",
             "date_updated",
+            "status",
         ]
 
     # ---- identity helpers ----
@@ -513,6 +514,14 @@ class PledgeSerializer(serializers.ModelSerializer):
             return None
 
         return None
+    
+    def create(self, validated_data):
+        # Never allow the client to set status on create
+        validated_data.pop("status", None)
+
+        # Use model default ("pending") unless your view overrides it
+        return super().create(validated_data)
+
 
 class PledgeDetailSerializer(PledgeSerializer):
     """
