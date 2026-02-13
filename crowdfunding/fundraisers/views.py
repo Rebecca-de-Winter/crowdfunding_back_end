@@ -9,7 +9,7 @@ from .permissions import IsFundraiserOwner, IsSupporterOrFundraiserOwner
 
 
 from django.db.models import Sum, Count
-from django.db.models.functions import Coalesce,Lower
+from django.db.models.functions import Coalesce, Lower
 from decimal import Decimal
 
 from .models import (
@@ -1555,7 +1555,7 @@ class MyFundraiserRewardsReport(APIView):
             .select_related("reward_tier", "need")
         )
 
-        if fundraiser.require_pledge_approval:
+        if getattr(fundraiser, "require_pledge_approval", True):
             # Earned only after approval
             eligible_pledges = pledges_qs.filter(status_l="approved")
         else:
@@ -1565,14 +1565,13 @@ class MyFundraiserRewardsReport(APIView):
         # ----------------------------
         # Totals from detail tables
         # ----------------------------
-
         total_money_pledged = (
             MoneyPledge.objects.filter(
                 pledge__in=eligible_pledges,
                 pledge__need__need_type="money",
             )
             .aggregate(total=Coalesce(Sum("amount"), Decimal("0.00")))
-            ["total"]
+            .get("total", Decimal("0.00"))
         )
 
         total_time_hours = (
@@ -1581,7 +1580,7 @@ class MyFundraiserRewardsReport(APIView):
                 pledge__need__need_type="time",
             )
             .aggregate(total=Coalesce(Sum("hours_committed"), Decimal("0.00")))
-            ["total"]
+            .get("total", Decimal("0.00"))
         )
 
         total_item_quantity = (
@@ -1590,7 +1589,7 @@ class MyFundraiserRewardsReport(APIView):
                 pledge__need__need_type="item",
             )
             .aggregate(total=Coalesce(Sum("quantity"), 0))
-            ["total"]
+            .get("total", 0)
         )
 
         # ----------------------------
@@ -1657,7 +1656,7 @@ class MyFundraiserRewardsReport(APIView):
                 "totals": {
                     "total_money_pledged": str(total_money_pledged),
                     "total_time_hours_pledged": str(total_time_hours),
-                    "total_item_quantity_pledged": int(total_item_quantity),
+                    "total_item_quantity_pledged": int(total_item_quantity or 0),
                 },
                 "earned_money_reward_tiers": earned_money_reward_tiers,
                 "earned_other_reward_tiers": earned_other_reward_tiers,
