@@ -1788,7 +1788,6 @@ class ApplyTemplateToFundraiser(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        return Response({"detail": "APPLY TEMPLATE UPDATED ✅ (NO DATE CHECKS)"}, status=418)
 
         fundraiser_id = request.data.get("fundraiser_id")
         template_id = request.data.get("template_id")
@@ -1902,7 +1901,7 @@ class ApplyTemplateToFundraiser(APIView):
                     if missing:
                         raise ValidationError({
                             "detail": (
-                                f"Template time need '{tneed.title}' missing: "
+                                f"[NEW APPLY] Template time need '{tneed.title}' missing: "
                                 f"{', '.join(missing)}. Set these before applying."
                             )
                         })
