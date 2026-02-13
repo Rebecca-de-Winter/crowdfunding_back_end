@@ -1784,10 +1784,12 @@ class ApplyTemplateToFundraiser(APIView):
     - Only the owner of the fundraiser can apply a template.
     - The fundraiser must be "empty" (no existing needs or reward tiers).
     """
-
+    
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        return Response({"detail": "APPLY TEMPLATE UPDATED ✅ (NO DATE CHECKS)"}, status=418)
+
         fundraiser_id = request.data.get("fundraiser_id")
         template_id = request.data.get("template_id")
 
@@ -1890,10 +1892,6 @@ class ApplyTemplateToFundraiser(APIView):
                 elif tneed.need_type == "time":
                     # Guard against missing required fields for TimeNeed
                     missing = []
-                    if not tneed.start_datetime:
-                        missing.append("start_datetime")
-                    if not tneed.end_datetime:
-                        missing.append("end_datetime")
                     if tneed.volunteers_needed is None:
                         missing.append("volunteers_needed")
                     if not tneed.role_title:
