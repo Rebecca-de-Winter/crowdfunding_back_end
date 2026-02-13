@@ -604,6 +604,38 @@ class FundraiserSerializer(serializers.ModelSerializer):
         model = Fundraiser
         fields = "__all__"
         read_only_fields = ["date_created", "date_updated", "owner", "is_open"]
+    
+    def validate(self, attrs):
+        """
+        Enforce business rules:
+        - Draft fundraisers may have time needs with no dates (templates).
+        - Active fundraisers MUST have dates on all time needs.
+        """
+        # Figure out what status will be after this request
+        new_status = attrs.get("status")
+        current_status = getattr(self.instance, "status", None)
+        status_after = new_status if new_status is not None else current_status
+
+        # Only enforce when moving into active
+        if status_after == "active":
+            fundraiser = self.instance  # on update, instance exists
+            # If someone tries to create directly as active, we can't inspect needs yet
+            if fundraiser:
+                bad = []
+                for need in fundraiser.needs.filter(need_type="time"):
+                    td = getattr(need, "time_detail", None)
+                    if not td or not td.start_datetime or not td.end_datetime:
+                        bad.append(need.title)
+
+                if bad:
+                    raise serializers.ValidationError({
+                        "detail": (
+                            "Cannot set fundraiser to Active until all time needs have "
+                            "start and end times. Missing: " + ", ".join(bad)
+                        )
+                    })
+
+        return attrs
 
 
 class FundraiserDetailSerializer(FundraiserSerializer):
@@ -686,7 +718,7 @@ class TemplateNeedSerializer(serializers.ModelSerializer):
 
     start_datetime = serializers.DateTimeField(required=False, allow_null=True)
     end_datetime = serializers.DateTimeField(required=False, allow_null=True)
-    
+
     class Meta:
         model = TemplateNeed
         fields = [
