@@ -9,7 +9,7 @@ from .permissions import IsFundraiserOwner, IsSupporterOrFundraiserOwner
 
 
 from django.db.models import Sum, Count
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce,Lower
 from decimal import Decimal
 
 from .models import (
@@ -201,9 +201,6 @@ class PledgeList(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-
-
-
 class PledgeDetail(APIView):
     """
     View, update, or delete a single pledge.
@@ -253,7 +250,15 @@ class PledgeDetail(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class PledgeCancel(APIView):
-    
+    """
+    POST /pledges/<pk>/cancel/
+
+    Rules:
+    - Supporter can cancel:
+        - if fundraiser.require_pledge_approval is True -> ONLY while pledge is pending
+        - if fundraiser.require_pledge_approval is False -> can cancel unless already cancelled/declined
+    - Fundraiser owner can cancel (subject to transition rules)
+    """
     permission_classes = [permissions.IsAuthenticated, IsSupporterOrFundraiserOwner]
 
     def post(self, request, pk):
@@ -264,7 +269,21 @@ class PledgeCancel(APIView):
 
         self.check_object_permissions(request, pledge)
 
-        actor_role = "owner" if pledge.fundraiser.owner_id == request.user.id else "supporter"
+        is_owner = pledge.fundraiser.owner_id == request.user.id
+        actor_role = "owner" if is_owner else "supporter"
+
+        # ✅ Supporter restriction depends on fundraiser setting
+        if actor_role == "supporter":
+            if pledge.status in ["cancelled", "declined"]:
+                return Response({"detail": "Pledge is already closed."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if pledge.fundraiser.require_pledge_approval and pledge.status != "pending":
+                return Response(
+                    {"detail": "Supporters can only cancel pending pledges for fundraisers that require approval."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Your transition helper should enforce additional rules if you want them
         ensure_allowed_transition(current=pledge.status, target="cancelled", actor_role=actor_role)
 
         pledge.status = "cancelled"
@@ -273,9 +292,12 @@ class PledgeCancel(APIView):
 
 
 class PledgeApprove(APIView):
-
+    """
+    POST /pledges/<pk>/approve/
+    Only fundraiser owner can approve.
+    """
     permission_classes = [permissions.IsAuthenticated, IsFundraiserOwner]
-    
+
     def post(self, request, pk):
         try:
             pledge = Pledge.objects.select_related("fundraiser", "supporter").get(pk=pk)
@@ -285,13 +307,21 @@ class PledgeApprove(APIView):
         self.check_object_permissions(request, pledge)
 
         ensure_allowed_transition(current=pledge.status, target="approved", actor_role="owner")
+
+        # If already approved, be idempotent (nice UX)
+        if pledge.status == "approved":
+            return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
+
         pledge.status = "approved"
         pledge.save(update_fields=["status"])
         return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
 
 
 class PledgeDecline(APIView):
-
+    """
+    POST /pledges/<pk>/decline/
+    Only fundraiser owner can decline.
+    """
     permission_classes = [permissions.IsAuthenticated, IsFundraiserOwner]
 
     def post(self, request, pk):
@@ -303,6 +333,11 @@ class PledgeDecline(APIView):
         self.check_object_permissions(request, pledge)
 
         ensure_allowed_transition(current=pledge.status, target="declined", actor_role="owner")
+
+        # Idempotent
+        if pledge.status == "declined":
+            return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
+
         pledge.status = "declined"
         pledge.save(update_fields=["status"])
         return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
@@ -1482,7 +1517,7 @@ class FundraiserPledgesReport(APIView):
         }
 
         return Response(data)
-    
+
 class MyFundraiserRewardsReport(APIView):
     """
     For the CURRENTLY LOGGED-IN SUPPORTER:
@@ -1490,12 +1525,11 @@ class MyFundraiserRewardsReport(APIView):
 
     URL: /reports/fundraisers/<pk>/my-rewards/
 
-    Returns:
-    - fundraiser: id, title
-    - supporter: id, username
-    - totals: money / time / items pledged to THIS fundraiser
-    - earned_money_reward_tiers: tiers unlocked based on total money pledged
-    - earned_other_reward_tiers: tiers granted via time/item pledges
+    Rules:
+    - If fundraiser.require_pledge_approval is True:
+        rewards are based on APPROVED pledges only.
+    - If fundraiser.require_pledge_approval is False:
+        rewards are based on all pledges EXCEPT cancelled/declined (instant rewards).
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -1508,54 +1542,60 @@ class MyFundraiserRewardsReport(APIView):
     def get(self, request, pk):
         supporter = request.user
         fundraiser = self.get_object(pk)
-        active_statuses = ["pending", "approved"]
 
-        # All of THIS supporter’s active pledges for THIS fundraiser
+        # ----------------------------
+        # Pledges that count for rewards
+        # ----------------------------
         pledges_qs = (
             Pledge.objects.filter(
                 fundraiser=fundraiser,
                 supporter=supporter,
-                status__in=active_statuses,
             )
+            .annotate(status_l=Lower("status"))
             .select_related("reward_tier", "need")
         )
 
-        # --- Totals across pledge detail tables, scoped to THESE pledges only ---
+        if fundraiser.require_pledge_approval:
+            # Earned only after approval
+            eligible_pledges = pledges_qs.filter(status_l="approved")
+        else:
+            # Instant rewards: count everything except explicitly cancelled/declined
+            eligible_pledges = pledges_qs.exclude(status_l__in=["cancelled", "declined"])
 
-        # MONEY
-        money_pledges_qs = MoneyPledge.objects.filter(
-            pledge__in=pledges_qs,
-            pledge__need__need_type="money",   # defensive: only money needs
-        )
+        # ----------------------------
+        # Totals from detail tables
+        # ----------------------------
+
         total_money_pledged = (
-            money_pledges_qs.aggregate(total=Sum("amount"))["total"]
-            or Decimal("0")
+            MoneyPledge.objects.filter(
+                pledge__in=eligible_pledges,
+                pledge__need__need_type="money",
+            )
+            .aggregate(total=Coalesce(Sum("amount"), Decimal("0.00")))
+            ["total"]
         )
 
-        # TIME
-        time_pledges_qs = TimePledge.objects.filter(
-            pledge__in=pledges_qs,
-            pledge__need__need_type="time",    # defensive: only time needs
-        )
         total_time_hours = (
-            time_pledges_qs.aggregate(total=Sum("hours_committed"))["total"]
-            or Decimal("0")
+            TimePledge.objects.filter(
+                pledge__in=eligible_pledges,
+                pledge__need__need_type="time",
+            )
+            .aggregate(total=Coalesce(Sum("hours_committed"), Decimal("0.00")))
+            ["total"]
         )
 
-        # ITEMS
-        item_pledges_qs = ItemPledge.objects.filter(
-            pledge__in=pledges_qs,
-            pledge__need__need_type="item",    # defensive: only item needs
-        )
         total_item_quantity = (
-            item_pledges_qs.aggregate(total=Sum("quantity"))["total"]
-            or 0
+            ItemPledge.objects.filter(
+                pledge__in=eligible_pledges,
+                pledge__need__need_type="item",
+            )
+            .aggregate(total=Coalesce(Sum("quantity"), 0))
+            ["total"]
         )
 
-        # ------------------------------------------------------------------
-        # Money-based reward tiers (threshold model)
-        # ONLY reward_type = "money"
-        # ------------------------------------------------------------------
+        # ----------------------------
+        # Earned money reward tiers (cumulative thresholds)
+        # ----------------------------
         money_tiers_qs = (
             RewardTier.objects.filter(
                 fundraiser=fundraiser,
@@ -1577,14 +1617,13 @@ class MyFundraiserRewardsReport(APIView):
             for row in money_tiers_qs
         ]
 
-        # ------------------------------------------------------------------
-        # Time / item-based reward tiers
-        # These are set directly on pledge.reward_tier.
-        # We EXCLUDE reward_type="money" so Gold can't appear here.
-        # ------------------------------------------------------------------
+        # ----------------------------
+        # Earned time/item reward tiers:
+        # granted directly via pledge.reward_tier on eligible pledges
+        # (exclude money tiers so they don't show up twice)
+        # ----------------------------
         raw_other_tiers = (
-            pledges_qs
-            .exclude(reward_tier__isnull=True)
+            eligible_pledges.exclude(reward_tier__isnull=True)
             .exclude(reward_tier__reward_type="money")
             .values(
                 "reward_tier__id",
@@ -1611,27 +1650,19 @@ class MyFundraiserRewardsReport(APIView):
             for row in raw_other_tiers
         ]
 
-        data = {
-            "fundraiser": {
-                "id": fundraiser.id,
-                "title": fundraiser.title,
-            },
-            "supporter": {
-                "id": supporter.id,
-                "username": supporter.username,
-            },
-            "totals": {
-                "total_money_pledged": str(total_money_pledged),
-                "total_time_hours_pledged": str(total_time_hours),
-                "total_item_quantity_pledged": total_item_quantity,
-            },
-            "earned_money_reward_tiers": earned_money_reward_tiers,
-            "earned_other_reward_tiers": earned_other_reward_tiers,
-        }
-
-        return Response(data)
-
-
+        return Response(
+            {
+                "fundraiser": {"id": fundraiser.id, "title": fundraiser.title},
+                "supporter": {"id": supporter.id, "username": supporter.username},
+                "totals": {
+                    "total_money_pledged": str(total_money_pledged),
+                    "total_time_hours_pledged": str(total_time_hours),
+                    "total_item_quantity_pledged": int(total_item_quantity),
+                },
+                "earned_money_reward_tiers": earned_money_reward_tiers,
+                "earned_other_reward_tiers": earned_other_reward_tiers,
+            }
+        )
 
 
 class MyPledgesReport(APIView):
@@ -2127,87 +2158,4 @@ class TemplateNeedDetail(APIView):
         need = self.get_object(pk)
         need.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-from rest_framework.permissions import IsAuthenticated
 
-class PledgeCancel(APIView):
-    """
-    POST /pledges/<pk>/cancel/
-
-    Rules:
-    - Supporter can cancel ONLY while pledge.status == "pending"
-    - Fundraiser owner (organiser) can cancel even if pledge is "approved"
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        try:
-            pledge = Pledge.objects.select_related("fundraiser", "supporter").get(pk=pk)
-        except Pledge.DoesNotExist:
-            raise Http404
-
-        is_supporter = pledge.supporter_id == request.user.id
-        is_owner = pledge.fundraiser.owner_id == request.user.id
-
-        if not (is_supporter or is_owner):
-            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
-
-        # Supporter restriction
-        if is_supporter and pledge.status != "pending":
-            return Response(
-                {"detail": "Supporters can only cancel pending pledges."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Owner can cancel pending/approved (and anything else you want)
-        pledge.status = "cancelled"
-        pledge.save(update_fields=["status"])
-
-        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
-
-
-class PledgeApprove(APIView):
-    """
-    POST /pledges/<pk>/approve/
-
-    Rules:
-    - Only fundraiser owner can approve
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        try:
-            pledge = Pledge.objects.select_related("fundraiser").get(pk=pk)
-        except Pledge.DoesNotExist:
-            raise Http404
-
-        if pledge.fundraiser.owner_id != request.user.id:
-            return Response({"detail": "Only the organiser can approve pledges."}, status=status.HTTP_403_FORBIDDEN)
-
-        pledge.status = "approved"
-        pledge.save(update_fields=["status"])
-
-        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
-
-
-class PledgeDecline(APIView):
-    """
-    POST /pledges/<pk>/decline/
-
-    Rules:
-    - Only fundraiser owner can decline
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        try:
-            pledge = Pledge.objects.select_related("fundraiser").get(pk=pk)
-        except Pledge.DoesNotExist:
-            raise Http404
-
-        if pledge.fundraiser.owner_id != request.user.id:
-            return Response({"detail": "Only the organiser can decline pledges."}, status=status.HTTP_403_FORBIDDEN)
-
-        pledge.status = "declined"
-        pledge.save(update_fields=["status"])
-
-        return Response(PledgeDetailSerializer(pledge, context={"request": request}).data)
