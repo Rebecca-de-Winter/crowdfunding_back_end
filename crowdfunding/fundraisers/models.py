@@ -217,8 +217,8 @@ class TimeNeed(models.Model):
         on_delete=models.CASCADE,
         related_name="time_detail",
     )
-    start_datetime = models.DateTimeField()
-    end_datetime = models.DateTimeField()
+    start_datetime = models.DateTimeField(null=True, blank=True)
+    end_datetime =  models.DateTimeField(null=True, blank=True)
     volunteers_needed = models.IntegerField()
     role_title = models.CharField(max_length=200)
     location = models.CharField(max_length=200)
